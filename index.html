@@ -97,6 +97,21 @@
   .tbtn.stop{color:var(--warn)}.tbtn.stop:hover{border-color:var(--warn);background:#241d0c}
   .tbtn.done{color:var(--muted)}.tbtn.done:hover{border-color:var(--good);color:var(--good)}
   .empty{color:var(--faint);text-align:center;font-size:12px;padding:24px 10px}
+  .tbtn.dim{color:var(--faint);opacity:.55}.tbtn.dim:hover{opacity:1;border-color:var(--accent);color:var(--accent)}
+  .tbtn.del2{color:var(--faint);opacity:.5}.tbtn.del2:hover{opacity:1;border-color:var(--crit);color:var(--crit)}
+  .task .title.tlink{color:var(--ink);text-decoration:none;display:block}
+  .task .title.tlink:hover{color:var(--accent);text-decoration:underline}
+  .projbanner{display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:9px;border-radius:var(--r-sm);
+    background:#0d1a1e;border:1px solid var(--dom,var(--accent));box-shadow:inset 3px 0 0 var(--dom,var(--accent))}
+  .projbanner .pbi{flex:1;min-width:0;display:flex;flex-direction:column}
+  .projbanner .pbi b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .projbanner .pbi span{font-size:10px;color:var(--faint)}
+  .pbtn{border:1px solid var(--border);background:var(--panel-3);color:var(--muted);border-radius:6px;padding:6px 9px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}
+  .pbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .pbtn.arch:hover{border-color:var(--crit);color:var(--crit)}
+  .pcard.arch{opacity:.72;border-style:dashed}
+  .pcard.arch .restore{border:1px solid var(--border);background:var(--panel-3);color:var(--good);border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600}
+  .pcard.arch .restore:hover{border-color:var(--good);background:#0e2418}
   .filterbar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border-soft)}
   .chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel-3);
     color:var(--muted);cursor:pointer;transition:.12s;letter-spacing:.3px}
@@ -250,7 +265,7 @@
     <div class="panel">
       <header><span class="ic">✉</span><span class="h">Avisos de correo</span><span class="count" id="mailCount">0 sin leer</span></header>
       <div class="scroll" id="mailList"></div>
-      <div class="gmailfoot"><span class="g"></span> <span id="gmailStatus">Gmail: jorge@naturaltrade.ca · muestra en vivo (automatización 24/7 pendiente de OAuth)</span></div>
+      <div class="gmailfoot"><span class="g"></span> <span id="gmailStatus">Sincronizado con tu folder Gmail «1: to respond» (auto 24/7 pendiente de OAuth)</span></div>
     </div>
     <div class="panel" style="flex:none">
       <header><span class="ic">⧉</span><span class="h">Accesos NetSuite</span><span class="count">directo</span></header>
@@ -289,6 +304,7 @@ const DOMAINS = {
   mercado:{name:"Mercado",color:"#f4b740",dim:"#3a2c0e"}, netsuite:{name:"NetSuite",color:"#c792ea",dim:"#2e2140"},
   comercial:{name:"Comercial",color:"#56d97f",dim:"#123322"}, evento:{name:"Evento Sep",color:"#ff8bb0",dim:"#3a1a26"},
   seguridad:{name:"Seguridad/IT",color:"#f47272",dim:"#3a1818"},
+  personal:{name:"Personal/Otros",color:"#9aa7b8",dim:"#232c38"},
 };
 const $ = s=>document.querySelector(s);
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
@@ -303,6 +319,7 @@ function nowISO(){return new Date().toISOString();}
 let projects=[], tasks=[], entries=[], links=[], mails=[];
 let active=null;         // open cmd_time_entry row (ended_at null) or null
 let filter="all";
+let selProj=null;        // proyecto "abierto" (para gestionar/archivar)
 let toastT, ticking=false;
 
 // ================= AUTH =================
@@ -367,7 +384,7 @@ async function enterApp(session){
 async function refresh(){
   $("#app").classList.add("loading");
   const [p,t,e,l,m] = await Promise.all([
-    sb.from('cmd_project').select('*').eq('archived',false).order('sort'),
+    sb.from('cmd_project').select('*').order('sort'),
     sb.from('cmd_task').select('*').order('sort'),
     sb.from('cmd_time_entry').select('*').or('ended_at.is.null,started_at.gte.'+todayStartISO()),
     sb.from('cmd_ns_link').select('*').order('sort'),
@@ -416,11 +433,34 @@ async function toggleOtros(){
   await refresh(); paintOtros();
 }
 async function addTask(){
-  const inp=$("#newTask"), pid=$("#newProj").value, title=inp.value.trim(); if(!title)return;
+  const inp=$("#newTask"); let pid=$("#newProj").value; const title=inp.value.trim(); if(!title)return;
+  if(pid==='__new__'){ pid=await createCategory(); if(!pid){ return; } }
   await sb.from('cmd_task').insert({ project_id:pid, title, status:'pending', sort:0 });
   inp.value=""; toast("＋ Agregada: "+title); await refresh();
 }
 async function delTask(taskId){ await sb.from('cmd_task').delete().eq('id',taskId); toast("Pendiente eliminada"); await refresh(); }
+async function createCategory(){
+  const name=prompt("Nombre de la nueva categoría / proyecto:"); if(!name||!name.trim())return null;
+  const key='u'+Date.now().toString(36);
+  const { data, error } = await sb.from('cmd_project').insert({ key, name:name.trim(), domain:'personal', color:DOMAINS.personal.color, sort:900 }).select().single();
+  if(error){ toast("No se pudo crear: "+error.message); return null; }
+  toast("Categoría creada: "+name.trim()); await refresh(); return data.id;
+}
+function openProject(id){ selProj=id; renderAll(); }
+async function archiveProject(id){
+  const p=proj(id); if(!p)return;
+  const pend=tasks.filter(t=>t.project_id===id && t.status!=='done').length;
+  const msg="¿Archivar «"+p.name+"»?\nSe guarda en el histórico y deja de aparecer en la lista y el menú."+(pend?("\n\nOjo: aún tiene "+pend+" pendiente(s) activo(s)."):"");
+  if(!confirm(msg))return;
+  await sb.from('cmd_project').update({ archived:true }).eq('id',id);
+  selProj=null; if(filter===p.domain)filter='all';
+  toast("Proyecto archivado: "+p.name); await refresh();
+}
+async function restoreProject(id){ const p=proj(id); await sb.from('cmd_project').update({ archived:false }).eq('id',id); toast("Proyecto restaurado: "+(p?p.name:'')); await refresh(); }
+async function setTaskLink(t){
+  const url=prompt("Pega el enlace de la conversación de Claude (o cualquier URL) para «"+t.title+"»:", t.link||'');
+  if(url===null)return; await sb.from('cmd_task').update({ link:url.trim()||null }).eq('id',t.id); toast(url.trim()?"Vinculado":"Enlace quitado"); await refresh();
+}
 async function markMail(m){ await sb.from('cmd_mail_alert').update({ status:'read' }).eq('id',m.id); await refresh(); }
 async function setLinkUrl(l){
   const url=prompt("Pega el URL de NetSuite para «"+l.label+"»:", l.url==='#'?'':l.url);
@@ -459,49 +499,83 @@ function taskRow(t){
   const div=document.createElement("div");
   div.className="task"+(t.status==='running'?" running":"")+(t.status==='done'?" done":"");
   div.dataset.id=t.id; div.style.setProperty("--dom",dom.color); div.style.setProperty("--dom-dim",dom.dim);
+  const linkBtn = t.link
+    ? '<button class="tbtn" data-act="openlink" title="Abrir conversación / enlace">🔗</button>'
+    : '<button class="tbtn dim" data-act="setlink" title="Vincular a una conversación de Claude / URL">🔗</button>';
   let ctrl="";
-  if(t.status==='done') ctrl='<button class="tbtn done" data-act="del" title="Eliminar">🗑</button>';
-  else if(t.status==='running') ctrl='<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button>';
-  else ctrl='<button class="tbtn play" data-act="start" title="Iniciar">▶</button><button class="tbtn done" data-act="finish" title="Terminar">✓</button>';
-  div.innerHTML='<div class="body"><div class="title">'+esc(t.title)+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span><span class="elapsed">'+fmt(taskSec(t))+'</span></div></div>'+ctrl;
+  if(t.status==='done') ctrl=linkBtn+'<button class="tbtn done" data-act="del" title="Eliminar">🗑</button>';
+  else if(t.status==='running') ctrl=linkBtn+'<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button><button class="tbtn del2" data-act="del" title="Eliminar pendiente">🗑</button>';
+  else ctrl=linkBtn+'<button class="tbtn play" data-act="start" title="Iniciar">▶</button><button class="tbtn done" data-act="finish" title="Terminar">✓</button><button class="tbtn del2" data-act="del" title="Eliminar pendiente">🗑</button>';
+  const titleHtml = t.link ? '<a class="title tlink" href="'+esc(t.link)+'" target="_blank" rel="noopener">'+esc(t.title)+'</a>' : '<div class="title">'+esc(t.title)+'</div>';
+  div.innerHTML='<div class="body">'+titleHtml+'<div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span><span class="elapsed">'+fmt(taskSec(t))+'</span></div></div>'+ctrl;
   div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
-    const a=b.dataset.act; if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id); else if(a==='del')delTask(t.id);}));
+    const a=b.dataset.act;
+    if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id);
+    else if(a==='del')delTask(t.id); else if(a==='openlink')window.open(t.link,'_blank'); else if(a==='setlink')setTaskLink(t);}));
   return div;
 }
 function renderTasks(){
   const list=$("#taskList"); list.innerHTML="";
-  let show=tasks.filter(t=>filter==='all'?true:(proj(t.project_id)||{}).domain===filter);
-  // ocultar 'done' que no son de hoy
+  // banner del proyecto abierto
+  if(selProj){
+    const p=proj(selProj);
+    const banner=document.createElement("div"); banner.className="projbanner"; banner.style.setProperty("--dom",(DOMAINS[(p||{}).domain]||{}).color||'#4dd0c4');
+    banner.innerHTML='<div class="pbi"><b>'+esc(p?p.name:'Proyecto')+'</b><span>proyecto abierto · gestiona o archiva</span></div>'+
+      '<button class="pbtn arch" data-a="archive" title="Archivar proyecto">🗑 Archivar</button>'+
+      '<button class="pbtn" data-a="clear" title="Ver todos">✕</button>';
+    banner.querySelector('[data-a="archive"]').addEventListener('click',()=>archiveProject(selProj));
+    banner.querySelector('[data-a="clear"]').addEventListener('click',()=>{selProj=null;renderAll();});
+    list.appendChild(banner);
+  }
+  let show=tasks.slice();
+  if(selProj){ show=show.filter(t=>t.project_id===selProj); }
+  else {
+    show=show.filter(t=>{ const p=proj(t.project_id); return p && !p.archived; });
+    if(filter!=='all') show=show.filter(t=>(proj(t.project_id)||{}).domain===filter);
+  }
   const ts=todayStartISO();
   show=show.filter(t=>t.status!=='done' || (t.done_at && t.done_at>=ts));
   const order={running:0,pending:1,done:2}; show.sort((a,b)=>order[a.status]-order[b.status]);
-  if(!show.length){list.innerHTML='<div class="empty">Sin pendientes en este filtro.<br>Agrega uno arriba ↑</div>';return;}
+  if(!show.length){ const e=document.createElement("div"); e.className="empty"; e.innerHTML='Sin pendientes aquí.<br>Agrega uno arriba ↑'; list.appendChild(e); return; }
   show.forEach(t=>list.appendChild(taskRow(t)));
 }
 function renderProjects(){
   const grid=$("#projGrid"); grid.innerHTML="";
-  let show=projects.filter(p=>filter==='all'?true:p.domain===filter);
-  $("#projCount").textContent=show.length+" proyectos";
+  const archivedView = (filter==='archived');
+  let show = archivedView ? projects.filter(p=>p.archived)
+                          : projects.filter(p=>!p.archived && (filter==='all'||p.domain===filter));
+  $("#projCount").textContent = archivedView ? (show.length+" archivados") : (show.length+" proyectos");
+  if(archivedView && !show.length){ const e=document.createElement("div"); e.className="empty"; e.style.gridColumn="1/-1"; e.textContent="No hay proyectos archivados."; grid.appendChild(e); return; }
   show.forEach(p=>{
     const dom=DOMAINS[p.domain]||{name:p.domain,color:'#33465c'}; const pend=tasks.filter(t=>t.project_id===p.id&&t.status!=='done').length;
-    const c=document.createElement("div"); c.className="pcard"+(filter===p.domain?" sel":""); c.dataset.id=p.id; c.style.setProperty("--dom",dom.color);
-    c.innerHTML='<button class="qadd" title="Agregar pendiente">＋</button><div class="dom">'+esc(dom.name)+'</div><div class="pname">'+esc(p.name)+'</div>'+
-      '<div class="pfoot"><div class="pend"><b>'+pend+'</b> pend.</div><div class="ptime"><div class="val">'+fmtHM(projSecToday(p))+'</div><div class="cap">hoy</div></div></div>';
-    c.addEventListener("click",()=>{filter=(filter===p.domain?"all":p.domain);renderAll();});
-    c.querySelector(".qadd").addEventListener("click",e=>{e.stopPropagation();$("#newProj").value=p.id;$("#newTask").focus();});
+    const c=document.createElement("div"); c.className="pcard"+(selProj===p.id?" sel":"")+(archivedView?" arch":""); c.dataset.id=p.id; c.style.setProperty("--dom",dom.color);
+    if(archivedView){
+      c.innerHTML='<div class="dom">'+esc(dom.name)+' · archivado</div><div class="pname">'+esc(p.name)+'</div>'+
+        '<div class="pfoot"><div class="pend">'+pend+' pend.</div><button class="restore">♻ Restaurar</button></div>';
+      c.querySelector(".restore").addEventListener("click",e=>{e.stopPropagation();restoreProject(p.id);});
+    } else {
+      c.innerHTML='<button class="qadd" title="Agregar pendiente aquí">＋</button><div class="dom">'+esc(dom.name)+'</div><div class="pname">'+esc(p.name)+'</div>'+
+        '<div class="pfoot"><div class="pend"><b>'+pend+'</b> pend.</div><div class="ptime"><div class="val">'+fmtHM(projSecToday(p))+'</div><div class="cap">hoy</div></div></div>';
+      c.addEventListener("click",()=>openProject(p.id));
+      c.querySelector(".qadd").addEventListener("click",e=>{e.stopPropagation();selProj=p.id;$("#newProj").value=p.id;$("#newTask").focus();renderAll();});
+    }
     grid.appendChild(c);
   });
 }
 function renderFilters(){
   const bar=$("#filterBar"); bar.innerHTML="";
   const mk=(key,label)=>{const b=document.createElement("button");b.className="chip"+(filter===key?" on":"");b.textContent=label;
-    if(key!=='all'){b.style.setProperty("--accent",DOMAINS[key].color);b.style.setProperty("--accent-dim",DOMAINS[key].dim);}
-    b.addEventListener("click",()=>{filter=key;renderAll();});bar.appendChild(b);};
-  mk("all","Todos"); Object.keys(DOMAINS).forEach(k=>mk(k,DOMAINS[k].name));
+    if(DOMAINS[key]){b.style.setProperty("--accent",DOMAINS[key].color);b.style.setProperty("--accent-dim",DOMAINS[key].dim);}
+    b.addEventListener("click",()=>{filter=key;selProj=null;renderAll();});bar.appendChild(b);};
+  mk("all","Todos");
+  Object.keys(DOMAINS).forEach(k=>{ if(projects.some(p=>!p.archived && p.domain===k)) mk(k,DOMAINS[k].name); });
+  const na=projects.filter(p=>p.archived).length;
+  if(na){ const b=document.createElement("button"); b.className="chip"+(filter==='archived'?" on":""); b.style.marginLeft="auto"; b.textContent="🗄 Archivados ("+na+")";
+    b.addEventListener("click",()=>{filter='archived';selProj=null;renderAll();}); bar.appendChild(b); }
 }
 function renderMail(){
   const list=$("#mailList"); list.innerHTML="";
-  if(!mails.length){list.innerHTML='<div class="empty">Sin avisos por ahora.<br>La conexión con Gmail se activa en la fase 2.</div>';}
+  if(!mails.length){list.innerHTML='<div class="empty">Tu folder «1: to respond» está en cero. 🎯<br>Etiqueta un correo así en Gmail y aparecerá aquí para responderlo.</div>';}
   mails.forEach(m=>{const d=document.createElement("div");d.className="mail"+(m.status==='unread'?" unread":"");
     const ini=(m.from_name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase();
     const time=m.received_at?new Date(m.received_at).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
@@ -537,7 +611,17 @@ function renderDayTotal(){
   const el=$("#prodPct"); el.textContent=tot>0?(pct+"% productivo"):"—";
   el.style.color=pct>=80?"var(--good)":pct>=60?"var(--warn)":"var(--crit)";
 }
-function renderNowSelect(){const sel=$("#newProj");sel.innerHTML="";projects.forEach(p=>{const o=document.createElement("option");o.value=p.id;o.textContent=p.name;sel.appendChild(o);});}
+function renderNowSelect(){
+  const sel=$("#newProj"); const cur=sel.value; sel.innerHTML="";
+  const active=projects.filter(p=>!p.archived);
+  const byDom={}; active.forEach(p=>{(byDom[p.domain]=byDom[p.domain]||[]).push(p);});
+  Object.keys(DOMAINS).forEach(dk=>{ if(!byDom[dk])return;
+    const og=document.createElement("optgroup"); og.label=DOMAINS[dk].name;
+    byDom[dk].forEach(p=>{const o=document.createElement("option");o.value=p.id;o.textContent=p.name;og.appendChild(o);});
+    sel.appendChild(og); });
+  const o=document.createElement("option"); o.value="__new__"; o.textContent="＋ Nueva categoría…"; sel.appendChild(o);
+  if(selProj && active.some(p=>p.id===selProj)) sel.value=selProj; else if(cur && cur!=='__new__') sel.value=cur;
+}
 function paintOtros(){const on=active&&active.kind==='otros';const ob=$("#otrosBtn");
   ob.classList.toggle("active",on);ob.setAttribute("aria-pressed",on?"true":"false");
   $("#oTxt").textContent=on?"EN OTROS…":"OTROS"; $("#oIcon").textContent=on?"■":"◉";}
@@ -546,6 +630,9 @@ function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); render
 // ---------- listeners ----------
 $("#addBtn").addEventListener("click",addTask);
 $("#newTask").addEventListener("keydown",e=>{if(e.key==='Enter')addTask();});
+$("#newProj").addEventListener("change", async e=>{
+  if(e.target.value==='__new__'){ const id=await createCategory(); if(id){ $("#newProj").value=id; } else { $("#newProj").selectedIndex=0; } }
+});
 const ob=$("#otrosBtn");
 ob.addEventListener("click",toggleOtros);
 ob.addEventListener("keydown",e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleOtros();}});
