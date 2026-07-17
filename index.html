@@ -99,6 +99,8 @@
   .empty{color:var(--faint);text-align:center;font-size:12px;padding:24px 10px}
   .tbtn.dim{color:var(--faint);opacity:.55}.tbtn.dim:hover{opacity:1;border-color:var(--accent);color:var(--accent)}
   .tbtn.del2{color:var(--faint);opacity:.5}.tbtn.del2:hover{opacity:1;border-color:var(--crit);color:var(--crit)}
+  .mail .aicat{font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;letter-spacing:.3px;color:var(--c);border:1px solid var(--c);white-space:nowrap}
+  .mail .aisug{font-size:11px;color:var(--accent);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .task .title.tlink{color:var(--ink);text-decoration:none;display:block}
   .task .title.tlink:hover{color:var(--accent);text-decoration:underline}
   .projbanner{display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:9px;border-radius:var(--r-sm);
@@ -265,7 +267,7 @@
     <div class="panel">
       <header><span class="ic">✉</span><span class="h">Avisos de correo</span><span class="count" id="mailCount">0 sin leer</span></header>
       <div class="scroll" id="mailList"></div>
-      <div class="gmailfoot"><span class="g"></span> <span id="gmailStatus">Sincronizado con tu folder Gmail «1: to respond» (auto 24/7 pendiente de OAuth)</span></div>
+      <div class="gmailfoot"><span class="g"></span> <span id="gmailStatus">Sync 24/7 de «1: to respond» · triage IA (clic abre el hilo en Gmail)</span></div>
     </div>
     <div class="panel" style="flex:none">
       <header><span class="ic">⧉</span><span class="h">Accesos NetSuite</span><span class="count">directo</span></header>
@@ -573,16 +575,29 @@ function renderFilters(){
   if(na){ const b=document.createElement("button"); b.className="chip"+(filter==='archived'?" on":""); b.style.marginLeft="auto"; b.textContent="🗄 Archivados ("+na+")";
     b.addEventListener("click",()=>{filter='archived';selProj=null;renderAll();}); bar.appendChild(b); }
 }
+const AICAT={ tu:{l:"Contéstalo tú",c:"#ef6a6a"}, rapido:{l:"Resp. rápida",c:"#f4b740"}, delegar:{l:"Delegar",c:"#7aa2f7"}, fyi:{l:"FYI",c:"#7e8ea3"} };
 function renderMail(){
   const list=$("#mailList"); list.innerHTML="";
-  if(!mails.length){list.innerHTML='<div class="empty">Tu folder «1: to respond» está en cero. 🎯<br>Etiqueta un correo así en Gmail y aparecerá aquí para responderlo.</div>';}
-  mails.forEach(m=>{const d=document.createElement("div");d.className="mail"+(m.status==='unread'?" unread":"");
-    const ini=(m.from_name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase();
-    const time=m.received_at?new Date(m.received_at).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
-    d.innerHTML='<div class="av">'+esc(ini)+'</div><div class="mbody"><div class="mfrom">'+esc(m.from_name||m.from_email||'')+' <span class="prio '+(m.priority||'media')+'">'+(m.priority||'media').toUpperCase()+'</span></div><div class="msub">'+esc(m.subject||'')+'</div></div><div class="mtime">'+time+'</div>';
+  if(!mails.length){ list.innerHTML='<div class="empty">Tu folder «1: to respond» está en cero. 🎯<br>Etiqueta un correo así en Gmail y aparecerá aquí para responderlo.</div>'; $("#mailCount").textContent="0"; return; }
+  const rank={tu:0,rapido:1,delegar:2,fyi:3};
+  const sorted=mails.slice().sort((a,b)=>{
+    const ra=rank[a.ai_category]!=null?rank[a.ai_category]:9, rb=rank[b.ai_category]!=null?rank[b.ai_category]:9;
+    if(ra!==rb)return ra-rb; return (b.received_at||"").localeCompare(a.received_at||"");
+  });
+  sorted.forEach(m=>{const d=document.createElement("div");d.className="mail"+(m.status==='unread'?" unread":"");
+    const ini=(m.from_name||'?').replace(/[<>]/g,'').split(/\s+/).map(x=>x[0]||'').slice(0,2).join('').toUpperCase();
+    const time=m.received_at?new Date(m.received_at).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}):'';
+    const cat=AICAT[m.ai_category];
+    const badge=cat?'<span class="aicat" style="--c:'+cat.c+'">'+cat.l+'</span>':'';
+    const sug=m.ai_suggestion?'<div class="aisug" title="'+esc(m.ai_reason||'')+'">▸ '+esc(m.ai_suggestion)+'</div>':'';
+    d.innerHTML='<div class="av">'+esc(ini||'?')+'</div><div class="mbody">'+
+      '<div class="mfrom">'+esc(m.from_name||m.from_email||'')+' '+badge+'</div>'+
+      '<div class="msub">'+esc(m.subject||'(sin asunto)')+'</div>'+sug+'</div>'+
+      '<div class="mtime">'+time+'</div>';
     d.addEventListener("click",()=>{ if(m.link)window.open(m.link,'_blank'); if(m.status==='unread')markMail(m); });
     list.appendChild(d);});
-  $("#mailCount").textContent=mails.filter(m=>m.status==='unread').length+" sin leer";
+  const nt=mails.filter(m=>m.ai_category==='tu').length;
+  $("#mailCount").textContent=mails.length+" · "+nt+" para ti";
 }
 function renderNS(){
   const g=$("#nsGrid"); g.innerHTML="";
