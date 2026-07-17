@@ -208,6 +208,10 @@
     <label for="gcode">Código de 6 dígitos (si tu correo lo trae)</label>
     <input id="gcode" inputmode="numeric" placeholder="123456" autocomplete="one-time-code">
     <button class="primary" id="verifyBtn" style="background:var(--panel-3);color:var(--ink);border:1px solid var(--border)">Verificar código</button>
+    <div class="divider">o pega el enlace</div>
+    <label for="glink">¿El correo te mandó a una página en blanco o a «localhost»? Copia ESA dirección completa y pégala aquí:</label>
+    <input id="glink" placeholder="localhost:3000/#access_token=..." autocomplete="off">
+    <button class="primary" id="linkBtn" style="background:var(--panel-3);color:var(--ink);border:1px solid var(--border)">Entrar con el enlace</button>
     <div class="msg" id="gmsg"></div>
   </div>
 </div>
@@ -317,6 +321,27 @@ $("#verifyBtn").addEventListener("click", async ()=>{
   const { error } = await sb.auth.verifyOtp({ email, token, type:'email' });
   $("#verifyBtn").disabled=false;
   if(error){ gmsg(error.message,"err"); return; }
+});
+$("#linkBtn").addEventListener("click", async ()=>{
+  const raw=$("#glink").value.trim(); if(!raw){ gmsg("Pega la dirección del correo.","err"); return; }
+  $("#linkBtn").disabled=true; gmsg("Entrando…");
+  try{
+    const frag = raw.includes('#') ? raw.split('#').slice(1).join('#') : (raw.includes('?') ? raw.split('?').slice(1).join('?') : raw);
+    const p = new URLSearchParams(frag);
+    const access_token=p.get('access_token'), refresh_token=p.get('refresh_token');
+    if(access_token){
+      const { error } = await sb.auth.setSession({ access_token, refresh_token: refresh_token||'' });
+      if(error){ gmsg(error.message,"err"); $("#linkBtn").disabled=false; return; }
+      return; // onAuthStateChange entra
+    }
+    const token_hash=p.get('token_hash')||p.get('token'); const type=p.get('type')||'magiclink';
+    if(token_hash){
+      const { error } = await sb.auth.verifyOtp({ token_hash, type });
+      if(error){ gmsg(error.message,"err"); $("#linkBtn").disabled=false; return; }
+      return;
+    }
+    gmsg("No encontré el token en esa dirección. Copia la barra completa después de dar clic en el correo.","err"); $("#linkBtn").disabled=false;
+  }catch(e){ gmsg("No pude leer esa dirección.","err"); $("#linkBtn").disabled=false; }
 });
 $("#signout").addEventListener("click", async ()=>{ await sb.auth.signOut(); location.reload(); });
 
