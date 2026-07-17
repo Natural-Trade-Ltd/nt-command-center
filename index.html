@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Centro de Mando · Jorge</title>
+<style>
+  :root{
+    --bg:#0b1017; --panel:#121b26; --panel-2:#0e151f; --panel-3:#0a0f17;
+    --border:#202c3c; --border-soft:#182231;
+    --ink:#e9eff7; --muted:#8092a6; --faint:#5a6b80;
+    --accent:#4dd0c4; --accent-dim:#1d4b48;
+    --good:#5ad97f; --good-dim:#173b25;
+    --warn:#f4b740; --warn-dim:#4a3712;
+    --crit:#ef6a6a; --crit-dim:#4a1e1e;
+    --mono:"Cascadia Code",ui-monospace,"SF Mono",Consolas,"Roboto Mono",monospace;
+    --ui:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    --r:10px; --r-sm:7px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 15% -10%, #12202e 0%, transparent 55%),
+      radial-gradient(1000px 500px at 100% 0%, #131a2a 0%, transparent 50%),
+      var(--bg);
+    color:var(--ink);font-family:var(--ui);font-size:14px;line-height:1.4;-webkit-font-smoothing:antialiased}
+  .grid{display:grid;height:100vh;
+    grid-template-columns:340px minmax(0,1fr) 372px;
+    grid-template-rows:auto minmax(0,1fr) auto;
+    grid-template-areas:"top top top" "left center right" "bar bar bar";
+    gap:12px;padding:12px}
+  .top{grid-area:top;display:flex;align-items:center;gap:18px;
+    background:linear-gradient(180deg,#141e2b,#101824);border:1px solid var(--border);border-radius:var(--r);padding:12px 18px}
+  .brand{display:flex;align-items:center;gap:12px;min-width:max-content}
+  .logo{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),#2b8c86);color:#04110f;font-weight:800;font-size:16px;
+    box-shadow:0 0 0 1px #2b8c8666,0 6px 20px -8px var(--accent)}
+  .brand h1{font-size:15px;margin:0;letter-spacing:.4px;font-weight:700}
+  .brand .sub{font-size:11px;color:var(--muted);letter-spacing:.6px;text-transform:uppercase}
+  .top .spacer{flex:1}
+  .stat{display:flex;flex-direction:column;align-items:flex-end;padding:0 16px;border-left:1px solid var(--border-soft)}
+  .stat .k{font-size:10px;color:var(--faint);letter-spacing:.8px;text-transform:uppercase}
+  .stat .v{font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .stat .v.accent{color:var(--accent)}
+  .clock{font-family:var(--mono);font-size:26px;font-variant-numeric:tabular-nums;letter-spacing:1px}
+  .clock .date{font-family:var(--ui);font-size:11px;color:var(--muted);text-align:right;letter-spacing:.4px}
+  .whoami{display:flex;flex-direction:column;align-items:flex-end;padding-left:16px;border-left:1px solid var(--border-soft)}
+  .whoami .em{font-size:11px;color:var(--muted)}
+  .whoami button{background:none;border:none;color:var(--faint);font-size:11px;cursor:pointer;padding:0}
+  .whoami button:hover{color:var(--crit)}
+  .nowpill{display:flex;align-items:center;gap:9px;padding:7px 14px;border-radius:999px;
+    background:var(--panel-3);border:1px solid var(--border);font-size:12px;min-width:230px}
+  .nowpill .dot{width:9px;height:9px;border-radius:50%;background:var(--faint)}
+  .nowpill.run{border-color:var(--good-dim);background:#0c1f16}
+  .nowpill.run .dot{background:var(--good);box-shadow:0 0 0 4px #5ad97f22;animation:pulse 1.6s infinite}
+  .nowpill.otros{border-color:var(--crit-dim);background:#1e1012}
+  .nowpill.otros .dot{background:var(--crit);box-shadow:0 0 0 4px #ef6a6a22;animation:pulse 1.2s infinite}
+  .nowpill .lbl{color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.6px}
+  .nowpill .txt{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+  .nowpill .t{font-family:var(--mono);margin-left:auto;font-variant-numeric:tabular-nums}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--border);border-radius:var(--r);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .panel>header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border-soft)}
+  .panel>header .h{font-size:12px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--ink)}
+  .panel>header .count{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:auto;font-variant-numeric:tabular-nums}
+  .panel>header .ic{color:var(--accent);font-size:14px}
+  .scroll{overflow-y:auto;padding:10px;min-height:0}
+  .scroll::-webkit-scrollbar{width:9px}.scroll::-webkit-scrollbar-thumb{background:#22303f;border-radius:9px;border:2px solid transparent;background-clip:content-box}
+  .left{grid-area:left}.center{grid-area:center}.right{grid-area:right;gap:12px;display:flex;flex-direction:column}
+  .right .panel:first-child{flex:1;min-height:0}
+  .addrow{display:flex;gap:6px;padding:10px;border-bottom:1px solid var(--border-soft)}
+  .addrow input,.addrow select{background:var(--panel-3);border:1px solid var(--border);color:var(--ink);
+    border-radius:var(--r-sm);padding:8px 10px;font-family:var(--ui);font-size:13px}
+  .addrow input{flex:1;min-width:0}.addrow input::placeholder{color:var(--faint)}
+  .addrow input:focus,.addrow select:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+  .addrow .addbtn{background:var(--accent);color:#04110f;border:none;border-radius:var(--r-sm);font-weight:800;width:38px;cursor:pointer;font-size:18px}
+  .addrow .addbtn:hover{filter:brightness(1.08)}
+  .task{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:var(--r-sm);
+    border:1px solid var(--border-soft);background:#0e1620;margin-bottom:8px;transition:border-color .15s,background .15s}
+  .task:hover{border-color:#2b3a4d}
+  .task.running{border-color:var(--good-dim);background:#0c1c15;box-shadow:inset 3px 0 0 var(--good)}
+  .task.done{opacity:.5}
+  .task .body{flex:1;min-width:0}
+  .task .title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .task.done .title{text-decoration:line-through;color:var(--muted)}
+  .task .meta{display:flex;align-items:center;gap:8px;margin-top:3px}
+  .tag{font-size:10px;padding:2px 7px;border-radius:999px;letter-spacing:.4px;font-weight:600;white-space:nowrap;
+    background:var(--dom-dim,#1a2636);color:var(--dom,#9db4cf)}
+  .task .elapsed{font-family:var(--mono);font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+  .task.running .elapsed{color:var(--good)}
+  .tbtn{border:1px solid var(--border);background:var(--panel-3);color:var(--ink);border-radius:var(--r-sm);
+    width:32px;height:32px;cursor:pointer;display:grid;place-items:center;font-size:13px;flex:none;transition:.12s}
+  .tbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .tbtn.play{color:var(--good)}.tbtn.play:hover{border-color:var(--good);background:#0e2418}
+  .tbtn.stop{color:var(--warn)}.tbtn.stop:hover{border-color:var(--warn);background:#241d0c}
+  .tbtn.done{color:var(--muted)}.tbtn.done:hover{border-color:var(--good);color:var(--good)}
+  .empty{color:var(--faint);text-align:center;font-size:12px;padding:24px 10px}
+  .filterbar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border-soft)}
+  .chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel-3);
+    color:var(--muted);cursor:pointer;transition:.12s;letter-spacing:.3px}
+  .chip:hover{border-color:#33465c;color:var(--ink)}
+  .chip.on{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+  .projgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:10px;padding:12px}
+  .pcard{border:1px solid var(--border-soft);background:#0e1620;border-radius:var(--r);padding:13px;cursor:pointer;transition:.15s;position:relative;overflow:hidden}
+  .pcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dom,#33465c)}
+  .pcard:hover{border-color:#2f4157;transform:translateY(-1px);box-shadow:0 10px 24px -16px #000}
+  .pcard.sel{border-color:var(--dom,var(--accent));box-shadow:0 0 0 1px var(--dom,var(--accent))}
+  .pcard .dom{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--dom,var(--muted));font-weight:700}
+  .pcard .pname{font-size:13.5px;font-weight:700;margin:4px 0 10px;line-height:1.25}
+  .pcard .pfoot{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
+  .pcard .pend{font-size:11px;color:var(--muted)}.pcard .pend b{color:var(--ink);font-size:16px;font-family:var(--mono)}
+  .pcard .ptime{text-align:right}
+  .pcard .ptime .val{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;color:var(--accent)}
+  .pcard .ptime .cap{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.4px}
+  .pcard .qadd{position:absolute;right:10px;top:10px;opacity:0;width:26px;height:26px;border-radius:6px;
+    border:1px solid var(--border);background:var(--panel-3);color:var(--accent);font-size:15px;cursor:pointer;transition:.12s}
+  .pcard:hover .qadd{opacity:1}
+  .mail{display:flex;gap:10px;padding:10px;border-radius:var(--r-sm);border:1px solid var(--border-soft);
+    background:#0e1620;margin-bottom:8px;cursor:pointer;transition:.12s}
+  .mail:hover{border-color:#2b3a4d}
+  .mail.unread{border-left:3px solid var(--warn)}
+  .mail .av{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:13px;background:#182636;color:var(--accent);flex:none}
+  .mail .mbody{flex:1;min-width:0}
+  .mail .mfrom{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
+  .mail .mfrom .prio{font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;letter-spacing:.3px}
+  .prio.alta{background:var(--crit-dim);color:#ff9b9b}.prio.media{background:var(--warn-dim);color:#f8cd77}.prio.baja{background:#1a2636;color:#9db4cf}
+  .mail .msub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mail .mtime{font-size:10px;color:var(--faint);white-space:nowrap;font-family:var(--mono)}
+  .gmailfoot{padding:8px 12px;border-top:1px solid var(--border-soft);font-size:10.5px;color:var(--faint);display:flex;align-items:center;gap:7px}
+  .gmailfoot .g{width:14px;height:14px;border-radius:3px;background:conic-gradient(from -45deg,#ea4335,#fbbc05,#34a853,#4285f4);flex:none}
+  .nsgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}
+  .nslink{display:flex;align-items:center;gap:9px;padding:10px;border-radius:var(--r-sm);border:1px solid var(--border-soft);
+    background:#0e1620;color:var(--ink);text-decoration:none;font-size:12px;font-weight:600;transition:.12s;cursor:pointer;position:relative}
+  .nslink:hover{border-color:var(--accent);background:#0c1a1f;color:var(--accent)}
+  .nslink.unset{opacity:.6;border-style:dashed}
+  .nslink .nsic{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;background:#16233240;font-size:14px;flex:none}
+  .nslink .arw{margin-left:auto;color:var(--faint);font-size:12px}
+  .nslink:hover .arw{color:var(--accent)}
+  .bar{grid-area:bar;display:flex;align-items:stretch;gap:12px;
+    background:linear-gradient(180deg,#101824,#0c1420);border:1px solid var(--border);border-radius:var(--r);padding:12px}
+  .otros{display:flex;align-items:center;gap:16px;padding:8px 22px;border-radius:var(--r);cursor:pointer;
+    border:1px solid var(--warn-dim);background:linear-gradient(180deg,#241c0b,#1c1608);min-width:290px;transition:.15s;user-select:none}
+  .otros:hover{border-color:var(--warn)}
+  .otros.active{border-color:var(--crit);background:linear-gradient(180deg,#2a1113,#200c0e);animation:glow 1.6s infinite}
+  @keyframes glow{0%,100%{box-shadow:0 0 0 1px var(--crit-dim)}50%{box-shadow:0 0 22px -4px #ef6a6a88}}
+  .otros .obtn{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:22px;flex:none;background:var(--warn-dim);color:var(--warn)}
+  .otros.active .obtn{background:var(--crit);color:#1a0808}
+  .otros .oinfo .olbl{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--faint)}
+  .otros .oinfo .otxt{font-size:16px;font-weight:800;letter-spacing:.4px}
+  .otros.active .oinfo .otxt{color:#ff9b9b}
+  .otros .otime{margin-left:auto;font-family:var(--mono);font-size:24px;font-variant-numeric:tabular-nums;color:var(--warn)}
+  .otros.active .otime{color:var(--crit)}
+  .breakdown{flex:1;display:flex;flex-direction:column;gap:6px;padding:2px 6px;min-width:0}
+  .breakdown .bhead{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint)}
+  .bars{display:flex;gap:3px;height:34px;align-items:flex-end;flex:1}
+  .bcol{flex:1;border-radius:3px 3px 0 0;min-height:3px;background:var(--dom,#2b3a4d);transition:height .4s ease}
+  .bcol:hover{filter:brightness(1.25)}
+  .blegend{display:flex;flex-wrap:wrap;gap:10px 14px;font-size:10px;color:var(--muted)}
+  .blegend span{display:flex;align-items:center;gap:5px}
+  .blegend i{width:8px;height:8px;border-radius:2px;background:var(--dom,#2b3a4d);display:inline-block}
+  .daytotal{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 20px;border-left:1px solid var(--border-soft);min-width:150px}
+  .daytotal .dv{font-family:var(--mono);font-size:30px;font-variant-numeric:tabular-nums;color:var(--ink);line-height:1}
+  .daytotal .dl{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--faint);margin-top:4px}
+  .daytotal .prod{font-size:11px;margin-top:5px;color:var(--good)}
+  #toast{position:fixed;bottom:110px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:#0e1a24;border:1px solid var(--accent);color:var(--ink);padding:9px 16px;border-radius:999px;
+    font-size:12px;transition:.3s;pointer-events:none;z-index:50;box-shadow:0 10px 30px -10px #000}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  /* auth overlay */
+  #gate{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:
+    radial-gradient(900px 500px at 50% 0%, #13212f 0%, transparent 60%), var(--bg)}
+  .card{width:380px;max-width:92vw;background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--border);border-radius:14px;padding:28px 26px;box-shadow:0 30px 80px -30px #000}
+  .card .logo{margin:0 auto 14px}
+  .card h2{margin:0 0 4px;text-align:center;font-size:18px}
+  .card p{margin:0 0 18px;text-align:center;color:var(--muted);font-size:12.5px}
+  .card label{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.5px;display:block;margin:12px 0 5px}
+  .card input{width:100%;background:var(--panel-3);border:1px solid var(--border);color:var(--ink);
+    border-radius:var(--r-sm);padding:11px 12px;font-size:14px;font-family:var(--ui)}
+  .card input:focus{outline:2px solid var(--accent);border-color:transparent}
+  .card button.primary{width:100%;margin-top:16px;background:var(--accent);color:#04110f;border:none;
+    border-radius:var(--r-sm);padding:12px;font-weight:800;font-size:14px;cursor:pointer}
+  .card button.primary:hover{filter:brightness(1.08)}
+  .card button.primary:disabled{opacity:.5;cursor:default}
+  .card .msg{margin-top:14px;font-size:12px;text-align:center;min-height:16px}
+  .card .msg.ok{color:var(--good)}.card .msg.err{color:var(--crit)}
+  .card .divider{display:flex;align-items:center;gap:10px;color:var(--faint);font-size:10px;margin:16px 0 4px;text-transform:uppercase;letter-spacing:.5px}
+  .card .divider::before,.card .divider::after{content:"";height:1px;background:var(--border-soft);flex:1}
+  .hidden{display:none!important}
+  #app.loading{opacity:.4;pointer-events:none}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ===== AUTH GATE ===== -->
+<div id="gate">
+  <div class="card">
+    <div class="logo">N</div>
+    <h2>Centro de Mando</h2>
+    <p>Acceso privado · Natural Trade / Global Forest</p>
+    <label for="gemail">Correo</label>
+    <input id="gemail" type="email" value="jorge@naturaltrade.ca" autocomplete="email">
+    <button class="primary" id="sendBtn">Enviar acceso</button>
+    <div class="divider">o con código</div>
+    <label for="gcode">Código de 6 dígitos (si tu correo lo trae)</label>
+    <input id="gcode" inputmode="numeric" placeholder="123456" autocomplete="one-time-code">
+    <button class="primary" id="verifyBtn" style="background:var(--panel-3);color:var(--ink);border:1px solid var(--border)">Verificar código</button>
+    <div class="msg" id="gmsg"></div>
+  </div>
+</div>
+
+<!-- ===== APP ===== -->
+<div class="grid hidden" id="app">
+  <div class="top">
+    <div class="brand"><div class="logo">N</div>
+      <div><h1>Centro de Mando</h1><div class="sub">Jorge · NT / GF</div></div></div>
+    <div id="nowpill" class="nowpill"><span class="dot"></span><span class="lbl">Enfoque</span><span class="txt" id="nowTxt">Sin actividad</span><span class="t" id="nowT">00:00:00</span></div>
+    <div class="spacer"></div>
+    <div class="stat"><span class="k">Trabajo hoy</span><span class="v accent" id="topWork">00:00</span></div>
+    <div class="stat"><span class="k">Otros hoy</span><span class="v" id="topOtros" style="color:var(--warn)">00:00</span></div>
+    <div class="stat"><span class="k">Pendientes</span><span class="v" id="topPend">0</span></div>
+    <div class="stat" style="border-right:1px solid var(--border-soft)"><span class="clock" id="clock">--:--:--</span><span class="date" id="date"></span></div>
+    <div class="whoami"><span class="em" id="whoEmail"></span><button id="signout">Cerrar sesión</button></div>
+  </div>
+
+  <div class="panel left">
+    <header><span class="ic">◧</span><span class="h">Mis Pendientes</span><span class="count" id="pendCount">0 activas</span></header>
+    <div class="addrow">
+      <input id="newTask" placeholder="Agregar pendiente…" autocomplete="off">
+      <select id="newProj"></select>
+      <button class="addbtn" id="addBtn" title="Agregar">＋</button>
+    </div>
+    <div class="scroll" id="taskList"></div>
+  </div>
+
+  <div class="panel center">
+    <header><span class="ic">◩</span><span class="h">Proyectos</span><span class="count" id="projCount"></span></header>
+    <div class="filterbar" id="filterBar"></div>
+    <div class="scroll" style="padding:0"><div class="projgrid" id="projGrid"></div></div>
+  </div>
+
+  <div class="right">
+    <div class="panel">
+      <header><span class="ic">✉</span><span class="h">Avisos de correo</span><span class="count" id="mailCount">0 sin leer</span></header>
+      <div class="scroll" id="mailList"></div>
+      <div class="gmailfoot"><span class="g"></span> <span id="gmailStatus">Gmail: pendiente de conectar (fase 2)</span></div>
+    </div>
+    <div class="panel" style="flex:none">
+      <header><span class="ic">⧉</span><span class="h">Accesos NetSuite</span><span class="count">directo</span></header>
+      <div class="nsgrid" id="nsGrid"></div>
+    </div>
+  </div>
+
+  <div class="bar">
+    <div class="otros" id="otrosBtn" role="button" tabindex="0" aria-pressed="false">
+      <div class="obtn" id="oIcon">◉</div>
+      <div class="oinfo"><div class="olbl">Distracción / no planeado</div><div class="otxt" id="oTxt">OTROS</div></div>
+      <div class="otime" id="oTime">00:00:00</div>
+    </div>
+    <div class="breakdown">
+      <div class="bhead"><span>Tiempo por proyecto · hoy</span><span id="bkTotal"></span></div>
+      <div class="bars" id="bars"></div>
+      <div class="blegend" id="legend"></div>
+    </div>
+    <div class="daytotal">
+      <div class="dv" id="dayTotal">0.0h</div><div class="dl">Registrado hoy</div><div class="prod" id="prodPct">—</div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SB_URL = 'https://pddqdfgwnhkojlnjcwzj.supabase.co';
+const SB_KEY = 'sb_publishable_dx3xOfvKAexeUSqJ_3jVkw_LdUKuXLt';
+const OWNER  = 'jorge@naturaltrade.ca';
+const sb = createClient(SB_URL, SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }});
+
+const DOMAINS = {
+  cotiza:{name:"Cotización",color:"#4dd0c4",dim:"#123634"}, portal:{name:"Portal/App",color:"#7aa2f7",dim:"#182a4a"},
+  mercado:{name:"Mercado",color:"#f4b740",dim:"#3a2c0e"}, netsuite:{name:"NetSuite",color:"#c792ea",dim:"#2e2140"},
+  comercial:{name:"Comercial",color:"#56d97f",dim:"#123322"}, evento:{name:"Evento Sep",color:"#ff8bb0",dim:"#3a1a26"},
+  seguridad:{name:"Seguridad/IT",color:"#f47272",dim:"#3a1818"},
+};
+const $ = s=>document.querySelector(s);
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function fmt(sec){const s=Math.max(0,Math.floor(sec));const h=String(Math.floor(s/3600)).padStart(2,"0");
+  const m=String(Math.floor(s/60)%60).padStart(2,"0");const ss=String(s%60).padStart(2,"0");return h+":"+m+":"+ss;}
+function fmtHM(sec){const s=Math.floor(sec);return String(Math.floor(s/3600)).padStart(2,"0")+":"+String(Math.floor(s/60)%60).padStart(2,"0");}
+function fmtH(sec){return (sec/3600).toFixed(1)+"h";}
+function todayStartISO(){const d=new Date();d.setHours(0,0,0,0);return d.toISOString();}
+function nowISO(){return new Date().toISOString();}
+
+// ---------- state ----------
+let projects=[], tasks=[], entries=[], links=[], mails=[];
+let active=null;         // open cmd_time_entry row (ended_at null) or null
+let filter="all";
+let toastT, ticking=false;
+
+// ================= AUTH =================
+function gmsg(t,cls){const el=$("#gmsg");el.textContent=t||"";el.className="msg "+(cls||"");}
+$("#sendBtn").addEventListener("click", async ()=>{
+  const email=$("#gemail").value.trim(); if(!email)return;
+  $("#sendBtn").disabled=true; gmsg("Enviando…");
+  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href.split('#')[0], shouldCreateUser:true }});
+  $("#sendBtn").disabled=false;
+  if(error){ gmsg(error.message,"err"); return; }
+  gmsg("Revisa tu correo: abre el enlace, o escribe abajo el código de 6 dígitos.","ok");
+});
+$("#verifyBtn").addEventListener("click", async ()=>{
+  const email=$("#gemail").value.trim(); const token=$("#gcode").value.trim();
+  if(!email||!token)return; $("#verifyBtn").disabled=true; gmsg("Verificando…");
+  const { error } = await sb.auth.verifyOtp({ email, token, type:'email' });
+  $("#verifyBtn").disabled=false;
+  if(error){ gmsg(error.message,"err"); return; }
+});
+$("#signout").addEventListener("click", async ()=>{ await sb.auth.signOut(); location.reload(); });
+
+sb.auth.onAuthStateChange((_ev, session)=>{
+  if(session && session.user){
+    if(session.user.email !== OWNER){ gmsg("Este acceso es privado.","err"); sb.auth.signOut(); return; }
+    enterApp(session);
+  }
+});
+(async ()=>{ const { data } = await sb.auth.getSession(); if(data.session) enterApp(data.session); })();
+
+async function enterApp(session){
+  $("#gate").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  $("#whoEmail").textContent = session.user.email;
+  history.replaceState(null,"",location.pathname); // limpia el hash del magic link
+  renderClock(); renderNowSelect();
+  await refresh();
+  if(!ticking){ ticking=true; setInterval(tick,1000); setInterval(refresh, 60000); }
+}
+
+// ================= DATA =================
+async function refresh(){
+  $("#app").classList.add("loading");
+  const [p,t,e,l,m] = await Promise.all([
+    sb.from('cmd_project').select('*').eq('archived',false).order('sort'),
+    sb.from('cmd_task').select('*').order('sort'),
+    sb.from('cmd_time_entry').select('*').or('ended_at.is.null,started_at.gte.'+todayStartISO()),
+    sb.from('cmd_ns_link').select('*').order('sort'),
+    sb.from('cmd_mail_alert').select('*').neq('status','done').order('received_at',{ascending:false}),
+  ]);
+  projects = p.data||[]; tasks = t.data||[]; entries = e.data||[]; links = l.data||[]; mails = m.data||[];
+  active = entries.find(x=>!x.ended_at) || null;
+  $("#app").classList.remove("loading");
+  renderAll();
+}
+const proj = id => projects.find(p=>p.id===id);
+function closedSecToday(projectId){ return entries.filter(x=>x.ended_at && x.project_id===projectId).reduce((a,x)=>a+(x.seconds||0),0); }
+function closedOtrosToday(){ return entries.filter(x=>x.ended_at && x.kind==='otros').reduce((a,x)=>a+(x.seconds||0),0); }
+function liveDelta(){ return active ? Math.max(0,(Date.now()-new Date(active.started_at).getTime())/1000) : 0; }
+function projSecToday(p){ let s=closedSecToday(p.id); if(active && active.kind==='task' && active.project_id===p.id) s+=liveDelta(); return s; }
+function otrosSecToday(){ let s=closedOtrosToday(); if(active && active.kind==='otros') s+=liveDelta(); return s; }
+function taskSec(task){ let s=entries.filter(x=>x.ended_at && x.task_id===task.id).reduce((a,x)=>a+(x.seconds||0),0);
+  if(active && active.task_id===task.id) s+=liveDelta(); return s; }
+function totalWorkToday(){ return projects.reduce((a,p)=>a+projSecToday(p),0); }
+
+// ================= ACTIONS =================
+async function closeActive(revertTaskTo='pending'){
+  if(!active) return;
+  const id=active.id, wasTask=active.task_id;
+  await sb.from('cmd_time_entry').update({ ended_at: nowISO() }).eq('id', id);
+  if(wasTask && revertTaskTo){ await sb.from('cmd_task').update({ status: revertTaskTo }).eq('id', wasTask); }
+  active=null;
+}
+async function startTask(taskId){
+  const tk=tasks.find(x=>x.id===taskId); if(!tk||tk.status==='done')return;
+  await closeActive('pending');
+  await sb.from('cmd_task').update({ status:'running' }).eq('id',taskId);
+  await sb.from('cmd_time_entry').insert({ task_id:taskId, project_id:tk.project_id, kind:'task', label:tk.title, started_at:nowISO() });
+  toast("▶ Iniciada: "+tk.title); await refresh(); paintOtros();
+}
+async function pauseTask(taskId){ await closeActive('pending'); toast("⏸ Pausada"); await refresh(); paintOtros(); }
+async function finishTask(taskId){
+  const tk=tasks.find(x=>x.id===taskId);
+  if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
+  await sb.from('cmd_task').update({ status:'done', done_at:nowISO() }).eq('id',taskId);
+  toast("✓ Terminada: "+(tk?tk.title:'')); await refresh(); paintOtros();
+}
+async function toggleOtros(){
+  if(active && active.kind==='otros'){ await closeActive(); toast("OTROS detenido"); }
+  else { await closeActive('pending'); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
+  await refresh(); paintOtros();
+}
+async function addTask(){
+  const inp=$("#newTask"), pid=$("#newProj").value, title=inp.value.trim(); if(!title)return;
+  await sb.from('cmd_task').insert({ project_id:pid, title, status:'pending', sort:0 });
+  inp.value=""; toast("＋ Agregada: "+title); await refresh();
+}
+async function delTask(taskId){ await sb.from('cmd_task').delete().eq('id',taskId); toast("Pendiente eliminada"); await refresh(); }
+async function markMail(m){ await sb.from('cmd_mail_alert').update({ status:'read' }).eq('id',m.id); await refresh(); }
+async function setLinkUrl(l){
+  const url=prompt("Pega el URL de NetSuite para «"+l.label+"»:", l.url==='#'?'':l.url);
+  if(url===null)return; await sb.from('cmd_ns_link').update({ url:url.trim()||'#' }).eq('id',l.id); toast("Acceso actualizado"); await refresh();
+}
+
+// ================= RENDER =================
+function renderClock(){const d=new Date();
+  $("#clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");
+  $("#date").textContent=d.toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"});}
+function tick(){ renderClock(); renderNow(); refreshLive(); }
+function renderTopStats(){
+  $("#topWork").textContent=fmtHM(totalWorkToday());
+  $("#topOtros").textContent=fmtHM(otrosSecToday());
+  const pend=tasks.filter(t=>t.status!=='done').length;
+  $("#topPend").textContent=pend; $("#pendCount").textContent=pend+" activas";
+}
+function renderNow(){
+  const pill=$("#nowpill"),txt=$("#nowTxt"),tt=$("#nowT"); pill.className="nowpill";
+  if(active && active.kind==='task'){ const tk=tasks.find(x=>x.id===active.task_id); pill.classList.add("run");
+    txt.textContent=tk?tk.title:active.label; tt.textContent=fmt(taskSec({id:active.task_id})); }
+  else if(active && active.kind==='otros'){ pill.classList.add("otros"); txt.textContent="OTROS (no planeado)"; tt.textContent=fmt(otrosSecToday()); }
+  else { txt.textContent="Sin actividad"; tt.textContent="00:00:00"; }
+}
+function refreshLive(){
+  if(active){
+    const el=document.querySelector('.task[data-id="'+active.task_id+'"] .elapsed');
+    if(el){const tk=tasks.find(x=>x.id===active.task_id); if(tk)el.textContent=fmt(taskSec(tk));}
+  }
+  $("#oTime").textContent=fmt(otrosSecToday());
+  projects.forEach(p=>{const v=document.querySelector('.pcard[data-id="'+p.id+'"] .ptime .val'); if(v)v.textContent=fmtHM(projSecToday(p));});
+  renderBars(); renderDayTotal(); renderTopStats();
+}
+function taskRow(t){
+  const p=proj(t.project_id); const dom=p?DOMAINS[p.domain]:{name:'—',color:'#33465c',dim:'#1a2636'};
+  const div=document.createElement("div");
+  div.className="task"+(t.status==='running'?" running":"")+(t.status==='done'?" done":"");
+  div.dataset.id=t.id; div.style.setProperty("--dom",dom.color); div.style.setProperty("--dom-dim",dom.dim);
+  let ctrl="";
+  if(t.status==='done') ctrl='<button class="tbtn done" data-act="del" title="Eliminar">🗑</button>';
+  else if(t.status==='running') ctrl='<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button>';
+  else ctrl='<button class="tbtn play" data-act="start" title="Iniciar">▶</button><button class="tbtn done" data-act="finish" title="Terminar">✓</button>';
+  div.innerHTML='<div class="body"><div class="title">'+esc(t.title)+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span><span class="elapsed">'+fmt(taskSec(t))+'</span></div></div>'+ctrl;
+  div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
+    const a=b.dataset.act; if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id); else if(a==='del')delTask(t.id);}));
+  return div;
+}
+function renderTasks(){
+  const list=$("#taskList"); list.innerHTML="";
+  let show=tasks.filter(t=>filter==='all'?true:(proj(t.project_id)||{}).domain===filter);
+  // ocultar 'done' que no son de hoy
+  const ts=todayStartISO();
+  show=show.filter(t=>t.status!=='done' || (t.done_at && t.done_at>=ts));
+  const order={running:0,pending:1,done:2}; show.sort((a,b)=>order[a.status]-order[b.status]);
+  if(!show.length){list.innerHTML='<div class="empty">Sin pendientes en este filtro.<br>Agrega uno arriba ↑</div>';return;}
+  show.forEach(t=>list.appendChild(taskRow(t)));
+}
+function renderProjects(){
+  const grid=$("#projGrid"); grid.innerHTML="";
+  let show=projects.filter(p=>filter==='all'?true:p.domain===filter);
+  $("#projCount").textContent=show.length+" proyectos";
+  show.forEach(p=>{
+    const dom=DOMAINS[p.domain]||{name:p.domain,color:'#33465c'}; const pend=tasks.filter(t=>t.project_id===p.id&&t.status!=='done').length;
+    const c=document.createElement("div"); c.className="pcard"+(filter===p.domain?" sel":""); c.dataset.id=p.id; c.style.setProperty("--dom",dom.color);
+    c.innerHTML='<button class="qadd" title="Agregar pendiente">＋</button><div class="dom">'+esc(dom.name)+'</div><div class="pname">'+esc(p.name)+'</div>'+
+      '<div class="pfoot"><div class="pend"><b>'+pend+'</b> pend.</div><div class="ptime"><div class="val">'+fmtHM(projSecToday(p))+'</div><div class="cap">hoy</div></div></div>';
+    c.addEventListener("click",()=>{filter=(filter===p.domain?"all":p.domain);renderAll();});
+    c.querySelector(".qadd").addEventListener("click",e=>{e.stopPropagation();$("#newProj").value=p.id;$("#newTask").focus();});
+    grid.appendChild(c);
+  });
+}
+function renderFilters(){
+  const bar=$("#filterBar"); bar.innerHTML="";
+  const mk=(key,label)=>{const b=document.createElement("button");b.className="chip"+(filter===key?" on":"");b.textContent=label;
+    if(key!=='all'){b.style.setProperty("--accent",DOMAINS[key].color);b.style.setProperty("--accent-dim",DOMAINS[key].dim);}
+    b.addEventListener("click",()=>{filter=key;renderAll();});bar.appendChild(b);};
+  mk("all","Todos"); Object.keys(DOMAINS).forEach(k=>mk(k,DOMAINS[k].name));
+}
+function renderMail(){
+  const list=$("#mailList"); list.innerHTML="";
+  if(!mails.length){list.innerHTML='<div class="empty">Sin avisos por ahora.<br>La conexión con Gmail se activa en la fase 2.</div>';}
+  mails.forEach(m=>{const d=document.createElement("div");d.className="mail"+(m.status==='unread'?" unread":"");
+    const ini=(m.from_name||'?').split(' ').map(x=>x[0]).slice(0,2).join('').toUpperCase();
+    const time=m.received_at?new Date(m.received_at).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
+    d.innerHTML='<div class="av">'+esc(ini)+'</div><div class="mbody"><div class="mfrom">'+esc(m.from_name||m.from_email||'')+' <span class="prio '+(m.priority||'media')+'">'+(m.priority||'media').toUpperCase()+'</span></div><div class="msub">'+esc(m.subject||'')+'</div></div><div class="mtime">'+time+'</div>';
+    d.addEventListener("click",()=>{ if(m.link)window.open(m.link,'_blank'); if(m.status==='unread')markMail(m); });
+    list.appendChild(d);});
+  $("#mailCount").textContent=mails.filter(m=>m.status==='unread').length+" sin leer";
+}
+function renderNS(){
+  const g=$("#nsGrid"); g.innerHTML="";
+  links.forEach(l=>{const a=document.createElement("a");a.className="nslink"+(l.url==='#'?" unset":"");a.title=l.url==='#'?"Clic para configurar el URL":("Abrir "+l.label);
+    a.innerHTML='<span class="nsic">'+(l.icon||'↗')+'</span>'+esc(l.label)+'<span class="arw">'+(l.url==='#'?'✎':'↗')+'</span>';
+    a.addEventListener("click",e=>{e.preventDefault(); if(l.url&&l.url!=='#')window.open(l.url,'_blank'); else setLinkUrl(l);});
+    a.addEventListener("contextmenu",e=>{e.preventDefault();setLinkUrl(l);});
+    g.appendChild(a);});
+}
+function renderBars(){
+  const bars=$("#bars"),leg=$("#legend");
+  const withTime=projects.map(p=>({p,s:projSecToday(p)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s);
+  const ot=otrosSecToday(); const max=Math.max(1,...withTime.map(x=>x.s),ot);
+  bars.innerHTML="";
+  withTime.forEach(x=>{const c=document.createElement("div");c.className="bcol";c.style.setProperty("--dom",(DOMAINS[x.p.domain]||{}).color||'#2b3a4d');
+    c.style.height=(6+94*x.s/max)+"%";c.title=x.p.name+" · "+fmtHM(x.s);bars.appendChild(c);});
+  if(ot>0){const c=document.createElement("div");c.className="bcol";c.style.setProperty("--dom","#ef6a6a");c.style.height=(6+94*ot/max)+"%";c.title="OTROS · "+fmtHM(ot);bars.appendChild(c);}
+  const doms=[...new Set(withTime.map(x=>x.p.domain))]; leg.innerHTML="";
+  doms.forEach(dk=>{const s=document.createElement("span");s.innerHTML='<i style="background:'+(DOMAINS[dk]||{}).color+'"></i>'+(DOMAINS[dk]||{}).name;leg.appendChild(s);});
+  if(ot>0){const s=document.createElement("span");s.innerHTML='<i style="background:#ef6a6a"></i>OTROS';leg.appendChild(s);}
+  $("#bkTotal").textContent=fmtHM(totalWorkToday()+ot)+" total";
+}
+function renderDayTotal(){
+  const w=totalWorkToday(); $("#dayTotal").textContent=fmtH(w);
+  const tot=w+otrosSecToday(); const pct=tot>0?Math.round(100*w/tot):0;
+  const el=$("#prodPct"); el.textContent=tot>0?(pct+"% productivo"):"—";
+  el.style.color=pct>=80?"var(--good)":pct>=60?"var(--warn)":"var(--crit)";
+}
+function renderNowSelect(){const sel=$("#newProj");sel.innerHTML="";projects.forEach(p=>{const o=document.createElement("option");o.value=p.id;o.textContent=p.name;sel.appendChild(o);});}
+function paintOtros(){const on=active&&active.kind==='otros';const ob=$("#otrosBtn");
+  ob.classList.toggle("active",on);ob.setAttribute("aria-pressed",on?"true":"false");
+  $("#oTxt").textContent=on?"EN OTROS…":"OTROS"; $("#oIcon").textContent=on?"■":"◉";}
+function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); renderFilters(); renderMail(); renderNS(); renderTopStats(); renderNow(); renderBars(); renderDayTotal(); paintOtros(); }
+
+// ---------- listeners ----------
+$("#addBtn").addEventListener("click",addTask);
+$("#newTask").addEventListener("keydown",e=>{if(e.key==='Enter')addTask();});
+const ob=$("#otrosBtn");
+ob.addEventListener("click",toggleOtros);
+ob.addEventListener("keydown",e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleOtros();}});
+function toast(msg){const el=$("#toast");el.textContent=msg;el.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove("show"),2200);}
+</script>
+</body>
+</html>
