@@ -1,0 +1,14 @@
+{
+  "name": "Centro de Mando — Jorge",
+  "short_name": "Centro de Mando",
+  "description": "Tu centro de mando personal: pendientes con cronómetro, distracciones, proyectos, correos y accesos.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1017",
+  "theme_color": "#0b1017",
+  "icons": [
+    { "src": "icon.svg", "sizes": "192x192 512x512 any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

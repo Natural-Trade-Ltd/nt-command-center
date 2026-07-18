@@ -3,8 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <title>Centro de Mando · Jorge</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b1017">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Centro de Mando">
 <style>
   :root{
     --bg:#0b1017; --panel:#121b26; --panel-2:#0e151f; --panel-3:#0a0f17;
@@ -723,6 +730,7 @@ const THEME_KEY='cmd_theme';
 function applyTheme(t){ document.documentElement.classList.toggle('light', t==='light'); const b=$("#themeBtn"); if(b)b.textContent=(t==='light'?'🌙':'☀'); }
 applyTheme(localStorage.getItem(THEME_KEY)||'dark');
 $("#themeBtn").addEventListener("click",()=>{ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(THEME_KEY,next); applyTheme(next); });
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{})); }
 function toast(msg){const el=$("#toast");el.textContent=msg;el.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove("show"),2200);}
 </script>
 </body>
