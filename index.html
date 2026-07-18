@@ -176,6 +176,15 @@
   .pcard.addcat .plus{font-size:20px;text-align:center;line-height:1}
   .pcard.addcat .addcat-in{text-align:center;font-size:11px;font-weight:600}
   .subtag{font-size:9px;color:var(--faint)}
+  .recrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:2px 10px 11px;border-bottom:1px solid var(--border-soft)}
+  .recrow .rlbl{font-size:11.5px;color:var(--muted);margin-right:3px;font-weight:600}
+  .recrow .rhint{font-size:11px;color:var(--faint);margin-left:2px}
+  .recrow .rclose{margin-left:auto;border:1px solid var(--border);background:var(--panel-3);color:var(--muted);border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;font-weight:600}
+  .recrow .rclose:hover{border-color:var(--accent);color:var(--accent)}
+  .daychip{border:1px solid var(--border);background:var(--panel-3);color:var(--muted);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:12px;font-weight:700}
+  .daychip.on{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+  .daychip.clr{width:auto;padding:0 10px;color:var(--faint)}
+  .task .rec{font-size:10px;padding:2px 7px;border-radius:999px;background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-dim);cursor:pointer;font-family:var(--mono);white-space:nowrap}
   .mail{display:flex;gap:10px;padding:10px;border-radius:var(--r-sm);border:1px solid var(--border-soft);
     background:var(--card);margin-bottom:8px;cursor:pointer;transition:.12s}
   .mail:hover{border-color:#2b3a4d}
@@ -336,8 +345,10 @@
     <div class="addrow">
       <input id="newTask" placeholder="Agregar pendiente…" autocomplete="off">
       <select id="newProj"></select>
+      <button class="addbtn" id="recBtn" title="Repetir en días (recurrente)" style="background:var(--panel-3);color:var(--muted);border:1px solid var(--border);font-size:16px">↻</button>
       <button class="addbtn" id="addBtn" title="Agregar">＋</button>
     </div>
+    <div id="recRow" class="recrow hidden"></div>
     <div class="scroll" id="taskList"></div>
   </div>
 
@@ -421,6 +432,9 @@ let projects=[], tasks=[], entries=[], links=[], mails=[];
 let active=null;         // open cmd_time_entry row (ended_at null) or null
 let filter="all";
 let selProj=null;        // proyecto "abierto" (para gestionar/archivar)
+let newRecur=[], recEditTask=null;
+const DOW=['','L','M','M','J','V','S','D'];                     // ISO 1=lun..7=dom
+const DOWFULL=['','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 let toastT, ticking=false;
 
 // ================= AUTH =================
@@ -517,7 +531,7 @@ async function closeActive(revertTaskTo='pending'){
 async function startTask(taskId){
   const tk=tasks.find(x=>x.id===taskId); if(!tk||tk.status==='done')return;
   await closeActive('pending');
-  await sb.from('cmd_task').update({ status:'running' }).eq('id',taskId);
+  await sb.from('cmd_task').update({ status:'running', done_at:null }).eq('id',taskId);
   await sb.from('cmd_time_entry').insert({ task_id:taskId, project_id:tk.project_id, kind:'task', label:tk.title, started_at:nowISO() });
   toast("▶ Iniciada: "+tk.title); await refresh(); paintOtros();
 }
@@ -525,8 +539,9 @@ async function pauseTask(taskId){ await closeActive('pending'); toast("⏸ Pausa
 async function finishTask(taskId){
   const tk=tasks.find(x=>x.id===taskId);
   if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
-  await sb.from('cmd_task').update({ status:'done', done_at:nowISO() }).eq('id',taskId);
-  toast("✓ Terminada: "+(tk?tk.title:'')); await refresh(); paintOtros();
+  if(tk && isWeekly(tk)) await sb.from('cmd_task').update({ done_at:nowISO(), status:'pending' }).eq('id',taskId);
+  else await sb.from('cmd_task').update({ status:'done', done_at:nowISO() }).eq('id',taskId);
+  toast("✓ Terminada"+((tk&&isWeekly(tk))?" (repite)":"")+": "+(tk?tk.title:'')); await refresh(); paintOtros();
 }
 async function toggleOtros(){
   if(active && active.kind==='otros'){ await closeActive(); toast("OTROS detenido"); }
@@ -537,8 +552,9 @@ async function addTask(){
   const inp=$("#newTask"); const pid=$("#newProj").value; const title=inp.value.trim(); if(!title)return;
   if(pid==='__new__'){ toast("Elige o crea una categoría primero"); return; }
   if(!pid){ toast("Elige un proyecto / categoría"); return; }
-  await sb.from('cmd_task').insert({ project_id:pid, title, status:'pending', sort:0 });
-  inp.value=""; toast("＋ Agregada: "+title); await refresh();
+  await sb.from('cmd_task').insert({ project_id:pid, title, status:'pending', sort:0, recurrence:newRecur.length?'semanal':'unica', days_week:newRecur.length?[...newRecur]:null });
+  inp.value=""; toast(newRecur.length?("＋ Agregada, repite "+newRecur.map(d=>DOW[d]).join('·')+": "+title):("＋ Agregada: "+title));
+  newRecur=[]; updateRecBtn(); $("#recRow").classList.add("hidden"); await refresh();
 }
 async function delTask(taskId){ await sb.from('cmd_task').delete().eq('id',taskId); toast("Pendiente eliminada"); await refresh(); }
 function newCategory(parentId){
@@ -578,7 +594,7 @@ function tick(){ renderClock(); renderNow(); refreshLive(); }
 function renderTopStats(){
   $("#topWork").textContent=fmtHM(totalWorkToday());
   $("#topOtros").textContent=fmtHM(otrosSecToday());
-  const pend=tasks.filter(t=>t.status!=='done').length;
+  const pend=tasks.filter(isPendingNow).length;
   $("#topPend").textContent=pend; $("#pendCount").textContent=pend+" activas";
 }
 function renderNow(){
@@ -599,22 +615,24 @@ function refreshLive(){
 }
 function taskRow(t){
   const p=proj(t.project_id); const dom=p?DOMAINS[p.domain]:{name:'—',color:'#33465c',dim:'#1a2636'};
+  const done=isDoneNow(t), running=(t.status==='running');
   const div=document.createElement("div");
-  div.className="task"+(t.status==='running'?" running":"")+(t.status==='done'?" done":"");
+  div.className="task"+(running?" running":"")+(done?" done":"");
   div.dataset.id=t.id; div.style.setProperty("--dom",dom.color); div.style.setProperty("--dom-dim",dom.dim);
   const linkBtn = t.link
     ? '<button class="tbtn" data-act="openlink" title="Abrir conversación / enlace">🔗</button>'
     : '<button class="tbtn dim" data-act="setlink" title="Vincular a una conversación de Claude / URL">🔗</button>';
   let ctrl="";
-  if(t.status==='done') ctrl=linkBtn+'<button class="tbtn done" data-act="del" title="Eliminar">🗑</button>';
-  else if(t.status==='running') ctrl=linkBtn+'<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button><button class="tbtn del2" data-act="del" title="Eliminar pendiente">🗑</button>';
+  if(done) ctrl=linkBtn+'<button class="tbtn done" data-act="del" title="Eliminar">🗑</button>';
+  else if(running) ctrl=linkBtn+'<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button><button class="tbtn del2" data-act="del" title="Eliminar pendiente">🗑</button>';
   else ctrl=linkBtn+'<button class="tbtn play" data-act="start" title="Iniciar">▶</button><button class="tbtn done" data-act="finish" title="Terminar">✓</button><button class="tbtn del2" data-act="del" title="Eliminar pendiente">🗑</button>';
   const titleHtml = t.link ? '<a class="title tlink" href="'+esc(t.link)+'" target="_blank" rel="noopener">'+esc(t.title)+'</a>' : '<div class="title">'+esc(t.title)+'</div>';
-  div.innerHTML='<div class="body">'+titleHtml+'<div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span><span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
+  const recBadge = isWeekly(t) ? '<span class="rec" data-act="editrec" title="Editar días de repetición">↻ '+t.days_week.map(d=>DOW[d]).join('·')+'</span>' : '';
+  div.innerHTML='<div class="body">'+titleHtml+'<div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
   div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
     const a=b.dataset.act;
     if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id);
-    else if(a==='del')delTask(t.id); else if(a==='openlink')window.open(t.link,'_blank'); else if(a==='setlink')setTaskLink(t);}));
+    else if(a==='del')delTask(t.id); else if(a==='openlink')window.open(t.link,'_blank'); else if(a==='setlink')setTaskLink(t); else if(a==='editrec')openRecEdit(t);}));
   return div;
 }
 function renderTasks(){
@@ -636,12 +654,34 @@ function renderTasks(){
     show=show.filter(t=>{ const p=proj(t.project_id); return p && !p.archived; });
     if(filter!=='all') show=show.filter(t=>(proj(t.project_id)||{}).domain===filter);
   }
-  const ts=todayStartISO();
-  show=show.filter(t=>t.status!=='done' || (t.done_at && t.done_at>=ts));
-  const order={running:0,pending:1,done:2}; show.sort((a,b)=>order[a.status]-order[b.status]);
+  show=show.filter(t=>schedToday(t));                 // recurrentes: solo en sus días
+  show=show.filter(t=>!isDoneNow(t) || doneToday(t)); // oculta completadas de días previos
+  const ord=t=>isDoneNow(t)?2:(t.status==='running'?0:1); show.sort((a,b)=>ord(a)-ord(b));
   if(!show.length){ const e=document.createElement("div"); e.className="empty"; e.innerHTML='Sin pendientes aquí.<br>Agrega uno arriba ↑'; list.appendChild(e); return; }
   show.forEach(t=>list.appendChild(taskRow(t)));
 }
+function todayDow(){ return ((new Date().getDay()+6)%7)+1; }
+function isWeekly(t){ return t.recurrence==='semanal' && Array.isArray(t.days_week) && t.days_week.length; }
+function schedToday(t){ return !isWeekly(t) || t.days_week.includes(todayDow()); }
+function doneToday(t){ return t.done_at && t.done_at>=todayStartISO(); }
+function isDoneNow(t){ return isWeekly(t)?doneToday(t):(t.status==='done'); }
+function isPendingNow(t){ return isWeekly(t)?(schedToday(t)&&!doneToday(t)):(t.status!=='done'); }
+function curRecur(){ if(recEditTask){ const t=tasks.find(x=>x.id===recEditTask); return (t&&t.days_week)||[]; } return newRecur; }
+function renderRecRow(){ const pop=$("#recRow"); if(!pop)return; const cur=curRecur();
+  const lbl=recEditTask?('Repetir «'+(((tasks.find(x=>x.id===recEditTask))||{}).title||'')+'» en:'):'Repetir en:';
+  pop.innerHTML='<span class="rlbl">'+esc(lbl)+'</span>';
+  [1,2,3,4,5,6,7].forEach(d=>{const b=document.createElement("button");b.className="daychip"+(cur.includes(d)?" on":"");b.textContent=DOW[d];b.title=DOWFULL[d];b.addEventListener("click",()=>toggleDay(d));pop.appendChild(b);});
+  const clr=document.createElement("button");clr.className="daychip clr";clr.textContent="Una vez";clr.addEventListener("click",()=>setDays([]));pop.appendChild(clr);
+  const hint=document.createElement("span");hint.className="rhint";hint.textContent=cur.length?('↻ repite '+cur.map(d=>DOW[d]).join('·')):'sin días = una sola vez';pop.appendChild(hint);
+  const close=document.createElement("button");close.className="rclose";close.textContent=recEditTask?"Listo":"Cerrar";close.addEventListener("click",()=>{recEditTask=null;$("#recRow").classList.add("hidden");});pop.appendChild(close);
+}
+async function toggleDay(d){ let cur=[...curRecur()]; if(cur.includes(d))cur=cur.filter(x=>x!==d); else cur.push(d); cur.sort((a,b)=>a-b); await setDays(cur); }
+async function setDays(arr){
+  if(recEditTask){ await sb.from('cmd_task').update({recurrence:arr.length?'semanal':'unica', days_week:arr.length?arr:null}).eq('id',recEditTask); await refresh(); renderRecRow(); toast(arr.length?("Repite: "+arr.map(d=>DOW[d]).join('·')):"Ahora es de una sola vez"); }
+  else { newRecur=arr; updateRecBtn(); renderRecRow(); }
+}
+function updateRecBtn(){ const b=$("#recBtn"); if(!b)return; const on=newRecur.length>0; b.style.color=on?'var(--accent)':'var(--muted)'; b.style.borderColor=on?'var(--accent)':'var(--border)'; b.title=on?('Repite: '+newRecur.map(d=>DOW[d]).join('·')):'Repetir en días (una vez por defecto)'; }
+function openRecEdit(t){ recEditTask=t.id; const p=$("#recRow"); p.classList.remove("hidden"); renderRecRow(); }
 function descendantIds(id){ return [id, ...projects.filter(p=>p.parent_id===id).map(p=>p.id)]; }
 function catSecToday(catId){ return descendantIds(catId).reduce((a,id)=>{ const p=proj(id); return a+(p?projSecToday(p):0); },0); }
 function renderProjects(){
@@ -773,6 +813,7 @@ function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); render
 // ---------- listeners ----------
 $("#addBtn").addEventListener("click",addTask);
 $("#newTask").addEventListener("keydown",e=>{if(e.key==='Enter')addTask();});
+$("#recBtn").addEventListener("click",e=>{e.stopPropagation();recEditTask=null;const p=$("#recRow");p.classList.toggle("hidden");if(!p.classList.contains("hidden"))renderRecRow();});
 $("#newProj").addEventListener("change", e=>{ if(e.target.value==='__new__') newCategory(null); });
 const ob=$("#otrosBtn");
 ob.addEventListener("click",toggleOtros);
