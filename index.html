@@ -163,9 +163,19 @@
   .pcard .ptime{text-align:right}
   .pcard .ptime .val{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;color:var(--accent)}
   .pcard .ptime .cap{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.4px}
-  .pcard .qadd{position:absolute;right:10px;top:10px;opacity:0;width:26px;height:26px;border-radius:6px;
-    border:1px solid var(--border);background:var(--panel-3);color:var(--accent);font-size:15px;cursor:pointer;transition:.12s}
-  .pcard:hover .qadd{opacity:1}
+  .pcard .qadd{position:absolute;right:8px;top:8px;height:22px;padding:0 9px;border-radius:6px;
+    border:1px solid var(--accent-dim);background:var(--accent-dim);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;z-index:2;white-space:nowrap}
+  .pcard .qadd:hover{filter:brightness(1.15)}
+  .pcard .subs{display:flex;flex-wrap:wrap;gap:5px;margin:2px 0 9px}
+  .subchip{font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--border);background:var(--panel-3);color:var(--muted);cursor:pointer;transition:.12s}
+  .subchip:hover{border-color:var(--dom,var(--accent));color:var(--ink)}
+  .subchip.on{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+  .subchip b{color:var(--ink);font-family:var(--mono)}
+  .pcard.addcat{display:grid;place-items:center;border-style:dashed;color:var(--muted);min-height:78px;cursor:pointer}
+  .pcard.addcat:hover{border-color:var(--accent);color:var(--accent)}
+  .pcard.addcat .plus{font-size:20px;text-align:center;line-height:1}
+  .pcard.addcat .addcat-in{text-align:center;font-size:11px;font-weight:600}
+  .subtag{font-size:9px;color:var(--faint)}
   .mail{display:flex;gap:10px;padding:10px;border-radius:var(--r-sm);border:1px solid var(--border-soft);
     background:var(--card);margin-bottom:8px;cursor:pointer;transition:.12s}
   .mail:hover{border-color:#2b3a4d}
@@ -251,6 +261,20 @@
   .weekcol.today span{color:var(--accent);font-weight:700}
   .iconbtn{background:var(--panel-3);border:1px solid var(--border);color:var(--ink);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;flex:none}
   .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .modal{position:fixed;inset:0;z-index:95;display:grid;place-items:center;background:rgba(4,8,12,.62)}
+  .modal .mcard{width:430px;max-width:92vw;background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--border);border-radius:14px;padding:22px 22px 18px;box-shadow:0 30px 80px -30px #000}
+  .modal .mcard h2{margin:0 0 4px;font-size:17px}
+  .modal .mcard .s{margin:0 0 12px;color:var(--muted);font-size:12.5px}
+  .modal label{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.5px;display:block;margin:10px 0 5px}
+  .modal input,.modal select{width:100%;background:var(--panel-3);border:1px solid var(--border);color:var(--ink);border-radius:var(--r-sm);padding:10px;font-size:14px;font-family:var(--ui)}
+  .modal input:focus,.modal select:focus{outline:2px solid var(--accent);border-color:transparent}
+  .modal .mrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .modal .mbtns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+  .modal .mbtn{border:1px solid var(--border);background:var(--panel-3);color:var(--ink);border-radius:var(--r-sm);padding:9px 16px;font-weight:700;cursor:pointer;font-size:13px}
+  .modal .mbtn.primary{background:var(--accent);color:#04110f;border:none}
+  .modal .mbtn.primary:disabled{opacity:.5}
+  .modal .msg{margin-top:10px;font-size:12px;text-align:center;min-height:14px}
+  .modal .msg.err{color:var(--crit)}
   /* móvil */
   @media (max-width:980px){
     html,body{height:auto}
@@ -318,7 +342,7 @@
   </div>
 
   <div class="panel center">
-    <header><span class="ic">◩</span><span class="h">Proyectos</span><span class="count" id="projCount"></span></header>
+    <header><span class="ic">◩</span><span class="h">Proyecto / Categoría</span><span class="count" id="projCount"></span></header>
     <div class="filterbar" id="filterBar"></div>
     <div class="scroll" style="padding:0"><div class="projgrid" id="projGrid"></div></div>
   </div>
@@ -349,6 +373,20 @@
     <div class="daytotal">
       <div class="dv" id="dayTotal">0.0h</div><div class="dl">Registrado hoy</div><div class="prod" id="prodPct">—</div>
     </div>
+  </div>
+</div>
+<div id="catModal" class="modal hidden">
+  <div class="mcard">
+    <h2 id="catTitle">Nueva Categoría</h2>
+    <p class="s">Crea una categoría principal o una subcategoría dentro de otra.</p>
+    <label for="catName">Nombre</label>
+    <input id="catName" autocomplete="off" placeholder="Ej. Compras, Clientes VIP, Tolko…">
+    <div class="mrow">
+      <div><label for="catDom">Color / dominio</label><select id="catDom"></select></div>
+      <div><label for="catParent">Dentro de…</label><select id="catParent"></select></div>
+    </div>
+    <div class="mbtns"><button id="catCancel" class="mbtn">Cancelar</button><button id="catSave" class="mbtn primary">Crear</button></div>
+    <div class="msg" id="catMsg"></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -496,18 +534,20 @@ async function toggleOtros(){
   await refresh(); paintOtros();
 }
 async function addTask(){
-  const inp=$("#newTask"); let pid=$("#newProj").value; const title=inp.value.trim(); if(!title)return;
-  if(pid==='__new__'){ pid=await createCategory(); if(!pid){ return; } }
+  const inp=$("#newTask"); const pid=$("#newProj").value; const title=inp.value.trim(); if(!title)return;
+  if(pid==='__new__'){ toast("Elige o crea una categoría primero"); return; }
+  if(!pid){ toast("Elige un proyecto / categoría"); return; }
   await sb.from('cmd_task').insert({ project_id:pid, title, status:'pending', sort:0 });
   inp.value=""; toast("＋ Agregada: "+title); await refresh();
 }
 async function delTask(taskId){ await sb.from('cmd_task').delete().eq('id',taskId); toast("Pendiente eliminada"); await refresh(); }
-async function createCategory(){
-  const name=prompt("Nombre de la nueva categoría / proyecto:"); if(!name||!name.trim())return null;
-  const key='u'+Date.now().toString(36);
-  const { data, error } = await sb.from('cmd_project').insert({ key, name:name.trim(), domain:'personal', color:DOMAINS.personal.color, sort:900 }).select().single();
-  if(error){ toast("No se pudo crear: "+error.message); return null; }
-  toast("Categoría creada: "+name.trim()); await refresh(); return data.id;
+function newCategory(parentId){
+  $("#catTitle").textContent = parentId ? 'Nueva Subcategoría' : 'Nueva Categoría';
+  $("#catName").value=''; $("#catMsg").textContent=''; $("#catMsg").className='msg';
+  $("#catDom").innerHTML=Object.keys(DOMAINS).map(k=>'<option value="'+k+'">'+DOMAINS[k].name+'</option>').join('');
+  $("#catParent").innerHTML='<option value="">— Categoría principal —</option>'+projects.filter(p=>!p.archived&&!p.parent_id).map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');
+  if(parentId)$("#catParent").value=parentId;
+  $("#catModal").classList.remove("hidden"); setTimeout(()=>$("#catName").focus(),30);
 }
 function openProject(id){ selProj=id; renderAll(); }
 async function archiveProject(id){
@@ -554,7 +594,7 @@ function refreshLive(){
     if(el){const tk=tasks.find(x=>x.id===active.task_id); if(tk)el.textContent=fmt(taskSec(tk));}
   }
   $("#oTime").textContent=fmt(otrosSecToday());
-  projects.forEach(p=>{const v=document.querySelector('.pcard[data-id="'+p.id+'"] .ptime .val'); if(v)v.textContent=fmtHM(projSecToday(p));});
+  projects.forEach(p=>{const v=document.querySelector('.pcard[data-id="'+p.id+'"] .ptime .val'); if(v)v.textContent=fmtHM(catSecToday(p.id));});
   renderBars(); renderDayTotal(); renderTopStats(); renderWeek();
 }
 function taskRow(t){
@@ -591,7 +631,7 @@ function renderTasks(){
     list.appendChild(banner);
   }
   let show=tasks.slice();
-  if(selProj){ show=show.filter(t=>t.project_id===selProj); }
+  if(selProj){ const ids=descendantIds(selProj); show=show.filter(t=>ids.includes(t.project_id)); }
   else {
     show=show.filter(t=>{ const p=proj(t.project_id); return p && !p.archived; });
     if(filter!=='all') show=show.filter(t=>(proj(t.project_id)||{}).domain===filter);
@@ -602,28 +642,42 @@ function renderTasks(){
   if(!show.length){ const e=document.createElement("div"); e.className="empty"; e.innerHTML='Sin pendientes aquí.<br>Agrega uno arriba ↑'; list.appendChild(e); return; }
   show.forEach(t=>list.appendChild(taskRow(t)));
 }
+function descendantIds(id){ return [id, ...projects.filter(p=>p.parent_id===id).map(p=>p.id)]; }
+function catSecToday(catId){ return descendantIds(catId).reduce((a,id)=>{ const p=proj(id); return a+(p?projSecToday(p):0); },0); }
 function renderProjects(){
   const grid=$("#projGrid"); grid.innerHTML="";
-  const archivedView = (filter==='archived');
-  let show = archivedView ? projects.filter(p=>p.archived)
-                          : projects.filter(p=>!p.archived && (filter==='all'||p.domain===filter));
-  $("#projCount").textContent = archivedView ? (show.length+" archivados") : (show.length+" proyectos");
-  if(archivedView && !show.length){ const e=document.createElement("div"); e.className="empty"; e.style.gridColumn="1/-1"; e.textContent="No hay proyectos archivados."; grid.appendChild(e); return; }
-  show.forEach(p=>{
-    const dom=DOMAINS[p.domain]||{name:p.domain,color:'#33465c'}; const pend=tasks.filter(t=>t.project_id===p.id&&t.status!=='done').length;
-    const c=document.createElement("div"); c.className="pcard"+(selProj===p.id?" sel":"")+(archivedView?" arch":""); c.dataset.id=p.id; c.style.setProperty("--dom",dom.color);
-    if(archivedView){
-      c.innerHTML='<div class="dom">'+esc(dom.name)+' · archivado</div><div class="pname">'+esc(p.name)+'</div>'+
-        '<div class="pfoot"><div class="pend">'+pend+' pend.</div><button class="restore">♻ Restaurar</button></div>';
+  if(filter==='archived'){
+    const arch=projects.filter(p=>p.archived);
+    $("#projCount").textContent=arch.length+" archivados";
+    if(!arch.length){ const e=document.createElement("div"); e.className="empty"; e.style.gridColumn="1/-1"; e.textContent="No hay archivados."; grid.appendChild(e); return; }
+    arch.forEach(p=>{ const dom=DOMAINS[p.domain]||{name:p.domain,color:'#33465c'};
+      const c=document.createElement("div"); c.className="pcard arch"; c.dataset.id=p.id; c.style.setProperty("--dom",dom.color);
+      c.innerHTML='<div class="dom">'+esc(dom.name)+' · archivado</div><div class="pname">'+esc(p.name)+(p.parent_id?' <span class="subtag">(sub)</span>':'')+'</div><div class="pfoot"><div class="pend"></div><button class="restore">♻ Restaurar</button></div>';
       c.querySelector(".restore").addEventListener("click",e=>{e.stopPropagation();restoreProject(p.id);});
-    } else {
-      c.innerHTML='<button class="qadd" title="Agregar pendiente aquí">＋</button><div class="dom">'+esc(dom.name)+'</div><div class="pname">'+esc(p.name)+'</div>'+
-        '<div class="pfoot"><div class="pend"><b>'+pend+'</b> pend.</div><div class="ptime"><div class="val">'+fmtHM(projSecToday(p))+'</div><div class="cap">hoy</div></div></div>';
-      c.addEventListener("click",()=>openProject(p.id));
-      c.querySelector(".qadd").addEventListener("click",e=>{e.stopPropagation();selProj=p.id;$("#newProj").value=p.id;$("#newTask").focus();renderAll();});
-    }
+      grid.appendChild(c);
+    });
+    return;
+  }
+  const tops=projects.filter(p=>!p.archived && !p.parent_id && (filter==='all'||p.domain===filter));
+  $("#projCount").textContent=tops.length+" categorías";
+  tops.forEach(p=>{
+    const dom=DOMAINS[p.domain]||{name:p.domain,color:'#33465c'};
+    const subs=projects.filter(s=>!s.archived && s.parent_id===p.id);
+    const ids=descendantIds(p.id);
+    const pend=tasks.filter(t=>ids.includes(t.project_id) && t.status!=='done').length;
+    const subHtml = subs.length ? '<div class="subs">'+subs.map(s=>{ const sp=tasks.filter(t=>t.project_id===s.id&&t.status!=='done').length; return '<span class="subchip'+(selProj===s.id?' on':'')+'" data-sub="'+s.id+'">'+esc(s.name)+(sp?' <b>'+sp+'</b>':'')+'</span>'; }).join('')+'</div>' : '';
+    const c=document.createElement("div"); c.className="pcard"+(selProj===p.id?" sel":""); c.dataset.id=p.id; c.style.setProperty("--dom",dom.color);
+    c.innerHTML='<button class="qadd" title="Agregar subcategoría dentro" data-addsub="'+p.id+'">＋ sub</button><div class="dom">'+esc(dom.name)+'</div><div class="pname">'+esc(p.name)+'</div>'+subHtml+'<div class="pfoot"><div class="pend"><b>'+pend+'</b> pend.</div><div class="ptime"><div class="val">'+fmtHM(catSecToday(p.id))+'</div><div class="cap">hoy</div></div></div>';
+    c.addEventListener("click",e=>{
+      const sub=e.target.closest('[data-sub]'); if(sub){ selProj=sub.dataset.sub; renderAll(); return; }
+      const add=e.target.closest('[data-addsub]'); if(add){ e.stopPropagation(); newCategory(p.id); return; }
+      openProject(p.id);
+    });
     grid.appendChild(c);
   });
+  const addC=document.createElement("div"); addC.className="pcard addcat";
+  addC.innerHTML='<div class="addcat-in"><div class="plus">＋</div><div>Nueva categoría</div></div>';
+  addC.addEventListener("click",()=>newCategory(null)); grid.appendChild(addC);
 }
 function renderFilters(){
   const bar=$("#filterBar"); bar.innerHTML="";
@@ -703,14 +757,13 @@ function renderWeek(){
 }
 function renderNowSelect(){
   const sel=$("#newProj"); const cur=sel.value; sel.innerHTML="";
-  const active=projects.filter(p=>!p.archived);
-  const byDom={}; active.forEach(p=>{(byDom[p.domain]=byDom[p.domain]||[]).push(p);});
-  Object.keys(DOMAINS).forEach(dk=>{ if(!byDom[dk])return;
-    const og=document.createElement("optgroup"); og.label=DOMAINS[dk].name;
-    byDom[dk].forEach(p=>{const o=document.createElement("option");o.value=p.id;o.textContent=p.name;og.appendChild(o);});
-    sel.appendChild(og); });
+  const tops=projects.filter(p=>!p.archived&&!p.parent_id).sort((a,b)=>(a.sort||0)-(b.sort||0));
+  tops.forEach(p=>{
+    const o=document.createElement("option"); o.value=p.id; o.textContent=p.name; sel.appendChild(o);
+    projects.filter(s=>!s.archived&&s.parent_id===p.id).forEach(s=>{ const so=document.createElement("option"); so.value=s.id; so.textContent="   › "+s.name; sel.appendChild(so); });
+  });
   const o=document.createElement("option"); o.value="__new__"; o.textContent="＋ Nueva categoría…"; sel.appendChild(o);
-  if(selProj && active.some(p=>p.id===selProj)) sel.value=selProj; else if(cur && cur!=='__new__') sel.value=cur;
+  if(selProj && projects.some(p=>p.id===selProj&&!p.archived)) sel.value=selProj; else if(cur && cur!=='__new__') sel.value=cur;
 }
 function paintOtros(){const on=active&&active.kind==='otros';const ob=$("#otrosBtn");
   ob.classList.toggle("active",on);ob.setAttribute("aria-pressed",on?"true":"false");
@@ -720,9 +773,7 @@ function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); render
 // ---------- listeners ----------
 $("#addBtn").addEventListener("click",addTask);
 $("#newTask").addEventListener("keydown",e=>{if(e.key==='Enter')addTask();});
-$("#newProj").addEventListener("change", async e=>{
-  if(e.target.value==='__new__'){ const id=await createCategory(); if(id){ $("#newProj").value=id; } else { $("#newProj").selectedIndex=0; } }
-});
+$("#newProj").addEventListener("change", e=>{ if(e.target.value==='__new__') newCategory(null); });
 const ob=$("#otrosBtn");
 ob.addEventListener("click",toggleOtros);
 ob.addEventListener("keydown",e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleOtros();}});
@@ -731,6 +782,20 @@ function applyTheme(t){ document.documentElement.classList.toggle('light', t==='
 applyTheme(localStorage.getItem(THEME_KEY)||'dark');
 $("#themeBtn").addEventListener("click",()=>{ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(THEME_KEY,next); applyTheme(next); });
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{})); }
+function closeCat(){ $("#catModal").classList.add("hidden"); if($("#newProj").value==='__new__')$("#newProj").selectedIndex=0; }
+$("#catCancel").addEventListener("click",closeCat);
+$("#catModal").addEventListener("click",e=>{ if(e.target.id==='catModal')closeCat(); });
+$("#catName").addEventListener("keydown",e=>{ if(e.key==='Enter')$("#catSave").click(); });
+$("#catSave").addEventListener("click",async ()=>{
+  const nombre=$("#catName").value.trim(); if(!nombre){ $("#catMsg").textContent="Escribe un nombre"; $("#catMsg").className="msg err"; return; }
+  const dom=$("#catDom").value, parent=$("#catParent").value||null;
+  $("#catSave").disabled=true; $("#catMsg").textContent="Creando…"; $("#catMsg").className="msg";
+  const key='u'+Date.now().toString(36);
+  const { data, error } = await sb.from('cmd_project').insert({ key, name:nombre, domain:dom, color:(DOMAINS[dom]||{}).color||'#9aa7b8', parent_id:parent, sort:parent?500:100 }).select().single();
+  $("#catSave").disabled=false;
+  if(error){ $("#catMsg").textContent=error.message; $("#catMsg").className="msg err"; return; }
+  $("#catModal").classList.add("hidden"); toast(parent?"Subcategoría creada":"Categoría creada"); await refresh(); if(data&&data.id)$("#newProj").value=data.id;
+});
 function toast(msg){const el=$("#toast");el.textContent=msg;el.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove("show"),2200);}
 </script>
 </body>
