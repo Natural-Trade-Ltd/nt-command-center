@@ -207,6 +207,14 @@
   .notarow .nt{flex:1;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
   .notarow .nt small{display:block;color:var(--faint);font-size:10.5px;font-family:var(--mono);margin-top:3px}
   .notarow .nb{display:flex;gap:5px;flex:none}
+  .task .due2{font-size:10px;padding:2px 7px;border-radius:999px;background:var(--panel-3);border:1px solid var(--border-soft);color:var(--muted);cursor:pointer;white-space:nowrap}
+  .task .due2.late{background:var(--crit-dim);color:#ff9b9b;border-color:var(--crit);font-weight:700}
+  #resumenBody .resline{font-size:14px;color:var(--muted);margin:2px 0 12px}
+  #resumenBody h4{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint);margin:14px 0 6px;border-bottom:1px solid var(--border-soft);padding-bottom:5px}
+  #resumenBody .resrow{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:3px 0}
+  #resumenBody .resrow b{font-family:var(--mono);color:var(--accent)}
+  #resumenBody .resfoot{margin-top:14px;font-size:11px;color:var(--faint)}
+  #notaRec.rec-on{background:var(--crit-dim);border-color:var(--crit);color:var(--crit);animation:pulse 1.2s infinite}
   .mail{display:flex;gap:10px;padding:10px;border-radius:var(--r-sm);border:1px solid var(--border-soft);
     background:var(--card);margin-bottom:8px;cursor:pointer;transition:.12s}
   .mail:hover{border-color:#2b3a4d}
@@ -366,6 +374,7 @@
     <div class="stat"><span class="k">Otros hoy</span><span class="v" id="topOtros" style="color:var(--warn)">00:00</span></div>
     <div class="stat"><span class="k">Pendientes</span><span class="v" id="topPend">0</span></div>
     <div class="stat" style="border-right:1px solid var(--border-soft)"><span class="clock" id="clock">--:--:--</span><span class="date" id="date"></span></div>
+    <button class="iconbtn" id="resumenBtn" title="Resumen semanal">📊</button>
     <button class="iconbtn" id="notasBtn" title="Notas rápidas (sin tiempo)">📝</button>
     <button class="iconbtn" id="themeBtn" title="Cambiar tema claro/oscuro">☀</button>
     <div class="whoami"><span class="em" id="whoEmail"></span><button id="signout">Cerrar sesión</button></div>
@@ -426,8 +435,14 @@
   <div class="mcard">
     <div class="nmhead"><h2 style="flex:1;margin:0">📝 Notas rápidas</h2><button class="mbtn" id="notasClose">✕</button></div>
     <p class="s">Comentarios libres — sin tiempo ni fecha. Conviértelos en tarea cuando quieras.</p>
-    <div class="naddrow"><input id="notaInput" placeholder="Escribe una nota…" autocomplete="off"><button class="mbtn primary" id="notaAdd">Agregar</button></div>
+    <div class="naddrow"><input id="notaInput" placeholder="Escribe una nota…" autocomplete="off"><button class="mbtn" id="notaRec" title="Grabar nota de voz">🎤</button><button class="mbtn primary" id="notaAdd">Agregar</button></div>
     <div class="notaslist" id="notasList"></div>
+  </div>
+</div>
+<div id="resumenModal" class="modal hidden">
+  <div class="mcard">
+    <div class="nmhead"><h2 style="flex:1;margin:0">📊 Resumen de la semana</h2><button class="mbtn" id="resumenClose">✕</button></div>
+    <div id="resumenBody"></div>
   </div>
 </div>
 <div id="catModal" class="modal hidden">
@@ -633,12 +648,15 @@ async function setLinkUrl(l){
 
 // ---- responsable / iniciales, prioridad, orden ----
 function iniOf(s){ return (s||'?').replace(/[<>]/g,'').split(/\s+/).map(x=>x[0]||'').slice(0,2).join('').toUpperCase(); }
+function localDate(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function fmtDue(d){ if(!d)return ''; const p=d.split('-'); return p[2]+' '+['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][(+p[1])-1]; }
+function isOverdue(t){ return t.due_date && t.due_date < localDate() && !isDoneNow(t); }
 function taskRank(t){ return isDoneNow(t)?2:(t.status==='running'?0:1); }
 function prioRank(t){ const r={A:0,B:1,C:2}[t.priority_abc]; return r==null?3:r; }
 function sortTasks(arr){
   if(sortMode==='tiempo') return arr.sort((a,b)=>taskRank(a)-taskRank(b) || taskSec(b)-taskSec(a));
   if(sortMode==='reciente') return arr.sort((a,b)=>taskRank(a)-taskRank(b) || (b.created_at||'').localeCompare(a.created_at||''));
-  return arr.sort((a,b)=> taskRank(a)-taskRank(b) || prioRank(a)-prioRank(b) || (b.created_at||'').localeCompare(a.created_at||''));
+  return arr.sort((a,b)=> taskRank(a)-taskRank(b) || (isOverdue(a)?0:1)-(isOverdue(b)?0:1) || prioRank(a)-prioRank(b) || (b.created_at||'').localeCompare(a.created_at||''));
 }
 // ---- editar tarea (modal) ----
 function openTaskEdit(t){
@@ -654,7 +672,8 @@ function openTaskEdit(t){
     '<label>Título</label><input id="edTitle" value="'+esc(t.title)+'">'+
     '<div class="mrow"><div><label>Responsable</label><input id="edResp" placeholder="Nombre (opcional)" value="'+esc(t.assignee||'')+'"></div>'+
     '<div><label>Prioridad</label><select id="edPrio">'+pOpt('','—')+pOpt('A','A · alta')+pOpt('B','B · media')+pOpt('C','C · baja')+'</select></div></div>'+
-    '<label>Categoría / Proyecto</label><select id="edCat">'+catOpts+'</select>'+
+    '<div class="mrow"><div><label>Categoría / Proyecto</label><select id="edCat">'+catOpts+'</select></div>'+
+    '<div><label>Fecha límite</label><input type="date" id="edDue" value="'+(t.due_date||'')+'"></div></div>'+
     '<label>Repetir en días (vacío = una sola vez)</label><div id="edDays" class="daysrow">'+daysHtml+'</div>'+
     '<label>Notas</label><textarea id="edNotes" rows="3" placeholder="Notas de la tarea…">'+esc(t.notes||'')+'</textarea>'+
     '<label>Enlace (conversación de Claude / URL)</label><input id="edLink" placeholder="https://…" value="'+esc(t.link||'')+'">'+
@@ -670,7 +689,7 @@ function openTaskEdit(t){
 async function saveTaskEdit(){
   if(!edId)return;
   const upd={ title:$("#edTitle").value.trim()||'(sin título)', assignee:$("#edResp").value.trim()||null,
-    priority_abc:$("#edPrio").value||null, project_id:$("#edCat").value||null,
+    priority_abc:$("#edPrio").value||null, project_id:$("#edCat").value||null, due_date:$("#edDue").value||null,
     notes:$("#edNotes").value.trim()||null, link:$("#edLink").value.trim()||null,
     recurrence:edDays.length?'semanal':'unica', days_week:edDays.length?edDays.slice():null };
   const {error}=await sb.from('cmd_task').update(upd).eq('id',edId);
@@ -681,13 +700,61 @@ async function saveTaskEdit(){
 async function loadNotas(){ const {data}=await sb.from('cmd_nota').select('*').order('created_at',{ascending:false}); notas=data||[]; renderNotas(); }
 function renderNotas(){ const el=$("#notasList"); if(!el)return;
   if(!notas.length){ el.innerHTML='<div class="empty">Sin notas. Escribe una arriba ↑</div>'; return; }
-  el.innerHTML=notas.map(n=>'<div class="notarow"><div class="nt">'+esc(n.texto)+'<small>'+new Date(n.created_at).toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</small></div><div class="nb"><button class="tbtn" title="Convertir en tarea" data-conv="'+n.id+'">➕</button><button class="tbtn del2" title="Borrar" data-del="'+n.id+'">🗑</button></div></div>').join('');
+  el.innerHTML=notas.map(n=>'<div class="notarow"><div class="nt">'+(n.audio_path?'🎤 ':'')+esc(n.texto)+'<small>'+new Date(n.created_at).toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</small></div><div class="nb">'+(n.audio_path?'<button class="tbtn" title="Reproducir" data-play="'+esc(n.audio_path)+'">▶</button>':'')+'<button class="tbtn" title="Convertir en tarea" data-conv="'+n.id+'">➕</button><button class="tbtn del2" title="Borrar" data-del="'+n.id+'">🗑</button></div></div>').join('');
+  el.querySelectorAll('[data-play]').forEach(b=>b.addEventListener('click',()=>playVoice(b.dataset.play)));
   el.querySelectorAll('[data-conv]').forEach(b=>b.addEventListener('click',()=>convertNota(b.dataset.conv)));
   el.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>delNota(b.dataset.del)));
 }
 async function addNota(){ const i=$("#notaInput"); const t=i.value.trim(); if(!t)return; i.value=''; await sb.from('cmd_nota').insert({texto:t}); await loadNotas(); toast('Nota agregada'); }
 async function delNota(id){ if(!confirm('¿Borrar esta nota?'))return; await sb.from('cmd_nota').delete().eq('id',id); await loadNotas(); }
 function convertNota(id){ const n=notas.find(x=>x.id===id); if(!n)return; $("#notasModal").classList.add("hidden"); $("#newTask").value=n.texto; $("#newTask").focus(); toast('Elige categoría y dale ＋ para convertirla en tarea'); }
+// ---- resumen semanal (en vivo) ----
+function buildResumen(){
+  const ws=weekStartISO(); let task=0,otros=0; const byP={}, byT={};
+  entries.filter(x=>x.ended_at && x.started_at>=ws).forEach(x=>{ const s=x.seconds||0;
+    if(x.kind==='otros')otros+=s; else { task+=s; if(x.project_id)byP[x.project_id]=(byP[x.project_id]||0)+s; if(x.task_id)byT[x.task_id]=(byT[x.task_id]||0)+s; } });
+  if(active&&active.started_at){ const d=liveDelta(); if(active.kind==='otros')otros+=d; else { task+=d; if(active.project_id)byP[active.project_id]=(byP[active.project_id]||0)+d; if(active.task_id)byT[active.task_id]=(byT[active.task_id]||0)+d; } }
+  const prod=(task+otros)>0?Math.round(100*task/(task+otros)):0;
+  const projRows=Object.entries(byP).sort((a,b)=>b[1]-a[1]).map(([id,s])=>({name:(proj(id)||{}).name||'—',s}));
+  const taskRows=Object.entries(byT).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([id,s])=>{const t=tasks.find(x=>x.id===id);return {name:t?t.title:'—',s};});
+  return {task,otros,prod,projRows,taskRows};
+}
+function renderResumen(){ const r=buildResumen(); const el=$("#resumenBody"); if(!el)return;
+  const col=r.prod>=80?'var(--good)':r.prod>=60?'var(--warn)':'var(--crit)';
+  el.innerHTML='<div class="resline"><b>'+fmtH(r.task)+'</b> productivo · <b>'+fmtH(r.otros)+'</b> OTROS · <b style="color:'+col+'">'+r.prod+'%</b> productivo</div>'+
+    '<h4>Por proyecto</h4>'+(r.projRows.length?r.projRows.map(x=>'<div class="resrow"><span>'+esc(x.name)+'</span><b>'+fmtHM(x.s)+'</b></div>').join(''):'<div class="empty">Sin tiempo esta semana</div>')+
+    '<h4>Top tareas por tiempo</h4>'+(r.taskRows.length?r.taskRows.map(x=>'<div class="resrow"><span>'+esc(x.name)+'</span><b>'+fmtHM(x.s)+'</b></div>').join(''):'<div class="empty">—</div>')+
+    '<div class="resfoot">Se guarda un resumen automático cada viernes en 📝 Notas.</div>';
+}
+// ---- notas de voz ----
+let mediaRec=null, recChunks=[], recognizer=null, recText='';
+async function toggleRec(){
+  if(mediaRec && mediaRec.state==='recording'){ mediaRec.stop(); if(recognizer){try{recognizer.stop();}catch(e){}} return; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Este dispositivo no permite grabar aquí'); return; }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    recChunks=[]; recText='';
+    mediaRec=new MediaRecorder(stream);
+    mediaRec.ondataavailable=e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
+    mediaRec.onstop=async()=>{ stream.getTracks().forEach(t=>t.stop()); recBtnUI(false); await saveVoice(); };
+    mediaRec.start(); recBtnUI(true);
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(SR){ recognizer=new SR(); recognizer.lang='es-MX'; recognizer.continuous=true; recognizer.interimResults=false;
+      recognizer.onresult=e=>{ for(let i=e.resultIndex;i<e.results.length;i++) if(e.results[i].isFinal) recText+=e.results[i][0].transcript+' '; };
+      try{recognizer.start();}catch(e){} }
+  }catch(e){ toast('No pude acceder al micrófono'); }
+}
+async function saveVoice(){
+  if(!recChunks.length) return;
+  const blob=new Blob(recChunks,{type:'audio/webm'});
+  const path='voz/'+Date.now()+'.webm';
+  const up=await sb.storage.from('cmd-audio').upload(path,blob,{contentType:'audio/webm'});
+  if(up.error){ toast('No se pudo subir: '+up.error.message); return; }
+  await sb.from('cmd_nota').insert({ texto:(recText.trim()||'🎤 Nota de voz'), audio_path:path });
+  await loadNotas(); toast(recText.trim()?'Nota de voz + texto guardados':'Nota de voz guardada');
+}
+function recBtnUI(on){ const b=$("#notaRec"); if(!b)return; b.textContent=on?'■':'🎤'; b.classList.toggle('rec-on',on); b.title=on?'Detener y guardar':'Grabar nota de voz'; }
+async function playVoice(path){ const {data,error}=await sb.storage.from('cmd-audio').createSignedUrl(path,3600); if(error||!data){ toast('No pude cargar el audio'); return; } new Audio(data.signedUrl).play(); }
 
 // ================= RENDER =================
 function renderClock(){const d=new Date();
@@ -732,7 +799,8 @@ function taskRow(t){
   const recBadge = isWeekly(t) ? '<span class="rec" data-act="edit" title="Repite '+t.days_week.map(d=>DOW[d]).join('·')+'">↻ '+t.days_week.map(d=>DOW[d]).join('·')+'</span>' : '';
   const respHtml = t.assignee ? '<span class="rav" data-act="edit" title="Responsable: '+esc(t.assignee)+'">'+esc(iniOf(t.assignee))+'</span>' : '';
   const noteHtml = t.notes ? '<span class="notei" data-act="edit" title="'+esc(t.notes)+'">📝</span>' : '';
-  div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+respHtml+noteHtml+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
+  const dueHtml = t.due_date ? '<span class="due2'+(isOverdue(t)?' late':'')+'" data-act="edit" title="Fecha límite">📅 '+fmtDue(t.due_date)+(isOverdue(t)?' · vencida':'')+'</span>' : '';
+  div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+dueHtml+respHtml+noteHtml+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
   div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
     const a=b.dataset.act;
     if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id);
@@ -923,6 +991,10 @@ $("#notasBtn").addEventListener("click",()=>{ $("#notasModal").classList.remove(
 $("#notasClose").addEventListener("click",()=>$("#notasModal").classList.add("hidden"));
 $("#notaAdd").addEventListener("click",addNota);
 $("#notaInput").addEventListener("keydown",e=>{if(e.key==='Enter')addNota();});
+$("#notaRec").addEventListener("click",toggleRec);
+$("#resumenBtn").addEventListener("click",()=>{ $("#resumenModal").classList.remove("hidden"); renderResumen(); });
+$("#resumenClose").addEventListener("click",()=>$("#resumenModal").classList.add("hidden"));
+$("#resumenModal").addEventListener("click",e=>{ if(e.target.id==='resumenModal')$("#resumenModal").classList.add("hidden"); });
 $("#taskModal").addEventListener("click",e=>{ if(e.target.id==='taskModal')$("#taskModal").classList.add("hidden"); });
 $("#notasModal").addEventListener("click",e=>{ if(e.target.id==='notasModal')$("#notasModal").classList.add("hidden"); });
 $("#newProj").addEventListener("change", e=>{ if(e.target.value==='__new__') newCategory(null); });
