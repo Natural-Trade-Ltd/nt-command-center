@@ -117,6 +117,13 @@
   .task .ctrls{display:flex;gap:6px;flex:none;padding-top:1px}
   .task .title{font-size:13px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
   .task.done .title{text-decoration:line-through;color:var(--muted)}
+  .task.sub{position:relative;margin-left:22px;border-style:dashed}
+  .task.sub::before{content:"↳";position:absolute;left:-15px;top:9px;color:var(--faint);font-size:13px}
+  .task.waiting{border-color:#8a6a2a;background:#241c0e;box-shadow:inset 3px 0 0 #e0b25b}
+  .task.waiting .title{color:#d8b25e}
+  .subcount{font-size:10px;padding:2px 7px;border-radius:999px;background:#16241c;color:var(--good);border:1px solid var(--good-dim);white-space:nowrap}
+  .espbadge{font-size:10px;padding:2px 7px;border-radius:999px;background:#2a2110;color:#e0b25b;border:1px solid #5a4620;font-family:var(--mono);white-space:nowrap}
+  .tbtn.txt{width:auto;padding:0 9px;font-size:11px;white-space:nowrap}
   .task .meta{display:flex;align-items:center;gap:8px;margin-top:3px}
   .tag{font-size:10px;padding:2px 7px;border-radius:999px;letter-spacing:.4px;font-weight:600;white-space:nowrap;
     background:var(--dom-dim,#1a2636);color:var(--dom,#9db4cf)}
@@ -236,6 +243,14 @@
   .nslink .nsic{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;background:#16233240;font-size:14px;flex:none}
   .nslink .arw{margin-left:auto;color:var(--faint);font-size:12px}
   .nslink:hover .arw{color:var(--accent)}
+  .nslink .nslbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nslink .nsedit{margin-left:auto;border:none;background:transparent;color:var(--faint);cursor:pointer;font-size:12px;padding:3px 6px;border-radius:5px;flex:none}
+  .nslink .nsedit:hover{background:#0c1a1f;color:var(--accent)}
+  .nslink.nsadd{border-style:dashed;justify-content:center;color:var(--muted);font-family:inherit}
+  .agrow{display:flex;gap:10px;padding:7px 10px;border-bottom:1px solid var(--border-soft);font-size:13px;align-items:baseline}
+  .agrow:last-child{border-bottom:none}
+  .agt{font-family:var(--mono);color:var(--accent);white-space:nowrap;flex:none;min-width:46px;font-size:12px}
+  .agttl{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bar{grid-area:bar;display:flex;align-items:stretch;gap:12px;
     background:linear-gradient(180deg,#101824,#0c1420);border:1px solid var(--border);border-radius:var(--r);padding:12px}
   .otros{display:flex;align-items:center;gap:16px;padding:8px 22px;border-radius:var(--r);cursor:pointer;
@@ -406,6 +421,10 @@
   </div>
 
   <div class="right">
+    <div class="panel" style="flex:none">
+      <header><span class="ic">📅</span><span class="h">Agenda de hoy</span><span class="count" id="agendaCount"></span></header>
+      <div class="scroll" id="agendaList" style="max-height:170px"></div>
+    </div>
     <div class="panel">
       <header><span class="ic">✉</span><span class="h">Avisos de correo</span><span class="count" id="mailCount">0 sin leer</span></header>
       <div class="scroll" id="mailList"></div>
@@ -435,6 +454,15 @@
 </div>
 <div id="taskModal" class="modal hidden">
   <div class="mcard"><h2>Editar tarea</h2><div id="taskEditBody"></div></div>
+</div>
+<div id="nsModal" class="modal hidden">
+  <div class="mcard">
+    <div class="nmhead"><h2 style="flex:1;margin:0" id="nsTitle">Editar acceso</h2><button class="mbtn" id="nsClose">✕</button></div>
+    <label>Nombre</label><input id="nsName" placeholder="Ej. Suppliers" autocomplete="off">
+    <label>Link de NetSuite (URL)</label><input id="nsUrl" placeholder="https://…" autocomplete="off">
+    <label>Ícono (1 emoji, opcional)</label><input id="nsIcon" maxlength="2" placeholder="↗" autocomplete="off">
+    <div class="mbtns"><button class="mbtn" id="nsDel" style="margin-right:auto;border-color:var(--crit-dim);color:var(--crit)">🗑</button><button class="mbtn" id="nsUp">↑</button><button class="mbtn" id="nsDown">↓</button><button class="mbtn" id="nsCancel">Cancelar</button><button class="mbtn primary" id="nsSave">Guardar</button></div>
+  </div>
 </div>
 <div id="notasModal" class="modal hidden">
   <div class="mcard">
@@ -492,7 +520,7 @@ function weekStartISO(){const d=new Date();const day=(d.getDay()+6)%7;d.setDate(
 function nowISO(){return new Date().toISOString();}
 
 // ---------- state ----------
-let projects=[], tasks=[], entries=[], links=[], mails=[];
+let projects=[], tasks=[], entries=[], links=[], mails=[], meetings=[], calConnected=false, nsId=null;
 let active=null;         // open cmd_time_entry row (ended_at null) or null
 let filter="all";
 let selProj=null;        // proyecto "abierto" (para gestionar/archivar)
@@ -569,26 +597,33 @@ async function enterApp(session){
 // ================= DATA =================
 async function refresh(){
   $("#app").classList.add("loading");
-  const [p,t,e,l,m] = await Promise.all([
+  const [p,t,e,l,m,mt,gk] = await Promise.all([
     sb.from('cmd_project').select('*').order('sort'),
     sb.from('cmd_task').select('*').order('sort'),
     sb.from('cmd_time_entry').select('*').or('ended_at.is.null,started_at.gte.'+weekStartISO()),
     sb.from('cmd_ns_link').select('*').order('sort'),
     sb.from('cmd_mail_alert').select('*').neq('status','done').order('received_at',{ascending:false}),
+    sb.from('cmo_meeting').select('*').eq('fecha',localDate()).order('inicio'),
+    sb.from('cmo_google_token').select('owner_id').maybeSingle(),
   ]);
-  projects = p.data||[]; tasks = t.data||[]; entries = e.data||[]; links = l.data||[]; mails = m.data||[];
+  projects = p.data||[]; tasks = t.data||[]; entries = e.data||[]; links = l.data||[]; mails = m.data||[]; meetings = mt.data||[]; calConnected = !!(gk&&gk.data);
   active = entries.find(x=>!x.ended_at) || null;
   $("#app").classList.remove("loading");
   renderAll();
 }
 const proj = id => projects.find(p=>p.id===id);
-function closedSecToday(projectId){ const ts=todayStartISO(); return entries.filter(x=>x.ended_at && x.project_id===projectId && x.started_at>=ts).reduce((a,x)=>a+(x.seconds||0),0); }
+function closedSecToday(projectId){ const ts=todayStartISO(); return entries.filter(x=>x.ended_at && x.kind==='task' && x.project_id===projectId && x.started_at>=ts).reduce((a,x)=>a+(x.seconds||0),0); }
 function closedOtrosToday(){ const ts=todayStartISO(); return entries.filter(x=>x.ended_at && x.kind==='otros' && x.started_at>=ts).reduce((a,x)=>a+(x.seconds||0),0); }
 function liveDelta(){ return active ? Math.max(0,(Date.now()-new Date(active.started_at).getTime())/1000) : 0; }
 function projSecToday(p){ let s=closedSecToday(p.id); if(active && active.kind==='task' && active.project_id===p.id) s+=liveDelta(); return s; }
 function otrosSecToday(){ let s=closedOtrosToday(); if(active && active.kind==='otros') s+=liveDelta(); return s; }
-function taskSec(task){ let s=entries.filter(x=>x.ended_at && x.task_id===task.id).reduce((a,x)=>a+(x.seconds||0),0);
-  if(active && active.task_id===task.id) s+=liveDelta(); return s; }
+function taskSec(task){ let s=entries.filter(x=>x.ended_at && x.kind==='task' && x.task_id===task.id).reduce((a,x)=>a+(x.seconds||0),0);
+  if(active && active.kind==='task' && active.task_id===task.id) s+=liveDelta();
+  tasks.forEach(c=>{ if(c.parent_task_id===task.id) s+=taskSec(c); }); return s; }
+function kidsOf(id){ return tasks.filter(c=>c.parent_task_id===id); }
+function taskEsperaSec(t){ let s=entries.filter(x=>x.ended_at && x.kind==='espera' && x.task_id===t.id).reduce((a,x)=>a+(x.seconds||0),0);
+  if(t.espera_desde && t.status!=='done') s+=Math.max(0,(Date.now()-new Date(t.espera_desde).getTime())/1000); return s; }
+function fmtDur(sec){ sec=Math.max(0,Math.floor(sec)); const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60); return d>0?(d+'d '+h+'h'):(h>0?(h+'h '+m+'m'):(m+'m')); }
 function totalWorkToday(){ return projects.reduce((a,p)=>a+projSecToday(p),0); }
 
 // ================= ACTIONS =================
@@ -602,18 +637,34 @@ async function closeActive(revertTaskTo='pending'){
 async function startTask(taskId){
   const tk=tasks.find(x=>x.id===taskId); if(!tk||tk.status==='done')return;
   await closeActive('pending');
-  await sb.from('cmd_task').update({ status:'running', done_at:null }).eq('id',taskId);
+  if(tk.espera_desde) await closeEspera(tk);
+  await sb.from('cmd_task').update({ status:'running', done_at:null, espera_desde:null }).eq('id',taskId);
   await sb.from('cmd_time_entry').insert({ task_id:taskId, project_id:tk.project_id, kind:'task', label:tk.title, started_at:nowISO() });
   toast("▶ Iniciada: "+tk.title); await refresh(); paintOtros();
 }
 async function pauseTask(taskId){ await closeActive('pending'); toast("⏸ Pausada"); await refresh(); paintOtros(); }
 async function finishTask(taskId){
   const tk=tasks.find(x=>x.id===taskId);
+  const kids=kidsOf(taskId); if(kids.length && kids.some(c=>!isDoneNow(c))){ toast("Faltan sub-tareas por completar"); return; }
   if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
-  if(tk && isWeekly(tk)) await sb.from('cmd_task').update({ done_at:nowISO(), status:'pending' }).eq('id',taskId);
-  else await sb.from('cmd_task').update({ status:'done', done_at:nowISO() }).eq('id',taskId);
+  if(tk && tk.espera_desde) await closeEspera(tk);
+  if(tk && isWeekly(tk)) await sb.from('cmd_task').update({ done_at:nowISO(), status:'pending', espera_desde:null }).eq('id',taskId);
+  else await sb.from('cmd_task').update({ status:'done', done_at:nowISO(), espera_desde:null }).eq('id',taskId);
   toast("✓ Terminada"+((tk&&isWeekly(tk))?" (repite)":"")+": "+(tk?tk.title:'')); await refresh(); paintOtros();
 }
+async function closeEspera(tk){ if(!tk||!tk.espera_desde)return;
+  await sb.from('cmd_time_entry').insert({ task_id:tk.id, project_id:tk.project_id, kind:'espera', label:'espera', started_at:tk.espera_desde, ended_at:nowISO() }); }
+async function setEspera(taskId){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
+  if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
+  await sb.from('cmd_task').update({ status:'pending', espera_desde:nowISO() }).eq('id',taskId);
+  toast("⏳ En espera — fuera de tu cancha"); await refresh(); paintOtros(); }
+async function resumeEspera(taskId){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
+  await closeEspera(tk); await sb.from('cmd_task').update({ espera_desde:null }).eq('id',taskId);
+  toast("↩ De vuelta en tu cancha"); await refresh(); }
+async function addSubtask(parentId){ const tk=tasks.find(x=>x.id===parentId); if(!tk)return;
+  const title=prompt("Nueva sub-tarea de «"+tk.title+"»:",""); if(title===null)return; const tt=title.trim(); if(!tt)return;
+  await sb.from('cmd_task').insert({ parent_task_id:parentId, project_id:tk.project_id, title:tt, status:'pending', sort:0 });
+  toast("＋ Sub-tarea agregada"); await refresh(); }
 async function toggleOtros(){
   if(active && active.kind==='otros'){ await closeActive(); toast("OTROS detenido"); }
   else { await closeActive('pending'); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
@@ -627,7 +678,7 @@ async function addTask(){
   inp.value=""; toast(newRecur.length?("＋ Agregada, repite "+newRecur.map(d=>DOW[d]).join('·')+": "+title):("＋ Agregada: "+title));
   newRecur=[]; updateRecBtn(); $("#recRow").classList.add("hidden"); await refresh();
 }
-async function delTask(taskId){ await sb.from('cmd_task').delete().eq('id',taskId); toast("Pendiente eliminada"); await refresh(); }
+async function delTask(taskId){ const kids=kidsOf(taskId); if(kids.length && !confirm("Tiene "+kids.length+" sub-tarea(s) que también se borrarán. ¿Eliminar?"))return; await sb.from('cmd_task').delete().eq('id',taskId); toast("Pendiente eliminada"); await refresh(); }
 function newCategory(parentId){
   $("#catTitle").textContent = parentId ? 'Nueva Subcategoría' : 'Nueva Categoría';
   $("#catName").value=''; $("#catMsg").textContent=''; $("#catMsg").className='msg';
@@ -775,7 +826,7 @@ function tick(){ renderClock(); renderNow(); refreshLive(); }
 function renderTopStats(){
   $("#topWork").textContent=fmtHM(totalWorkToday());
   $("#topOtros").textContent=fmtHM(otrosSecToday());
-  const pend=tasks.filter(isPendingNow).length;
+  const pend=tasks.filter(t=>isPendingNow(t)&&!t.parent_task_id).length;
   $("#topPend").textContent=pend; $("#pendCount").textContent=pend+" activas";
 }
 function renderNow(){
@@ -794,28 +845,34 @@ function refreshLive(){
   projects.forEach(p=>{const v=document.querySelector('.pcard[data-id="'+p.id+'"] .ptime .val'); if(v)v.textContent=fmtHM(catSecToday(p.id));});
   renderBars(); renderDayTotal(); renderTopStats(); renderWeek();
 }
-function taskRow(t){
+function taskRow(t, isSub){
   const p=proj(t.project_id); const dom=p?DOMAINS[p.domain]:{name:'—',color:'#33465c',dim:'#1a2636'};
-  const done=isDoneNow(t), running=(t.status==='running');
+  const done=isDoneNow(t), running=(t.status==='running'), waiting=(!!t.espera_desde && t.status!=='done');
   const div=document.createElement("div");
-  div.className="task"+(running?" running":"")+(done?" done":"");
+  div.className="task"+(running?" running":"")+(done?" done":"")+(waiting?" waiting":"")+(isSub?" sub":"");
   div.dataset.id=t.id; div.style.setProperty("--dom",dom.color); div.style.setProperty("--dom-dim",dom.dim);
   const editBtn='<button class="tbtn" data-act="edit" title="Editar (responsable, prioridad, notas, repetir, enlace)">✎</button>';
+  const subBtn=(!isSub)?'<button class="tbtn txt" data-act="addsub" title="Agregar sub-tarea">＋sub</button>':'';
+  const espBtn='<button class="tbtn" data-act="espera" title="No está en mi cancha (esperando a un tercero)">⏳</button>';
   let ctrl="";
   if(done) ctrl=editBtn+'<button class="tbtn done" data-act="del" title="Eliminar">🗑</button>';
-  else if(running) ctrl=editBtn+'<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button>';
-  else ctrl=editBtn+'<button class="tbtn play" data-act="start" title="Iniciar">▶</button><button class="tbtn done" data-act="finish" title="Terminar">✓</button>';
+  else if(waiting) ctrl=editBtn+'<button class="tbtn play" data-act="resume" title="Regresar a mi cancha">↩</button><button class="tbtn done" data-act="finish" title="Terminar (ya respondió)">✓</button><button class="tbtn del2" data-act="del">🗑</button>';
+  else if(running) ctrl=editBtn+subBtn+espBtn+'<button class="tbtn stop" data-act="pause" title="Pausar">⏸</button><button class="tbtn done" data-act="finish" title="Terminar y registrar">✓</button>';
+  else ctrl=editBtn+subBtn+espBtn+'<button class="tbtn play" data-act="start" title="Iniciar">▶</button><button class="tbtn done" data-act="finish" title="Terminar">✓</button>';
   const titleHtml = t.link ? '<a class="title tlink" href="'+esc(t.link)+'" target="_blank" rel="noopener">'+esc(t.title)+'</a>' : '<div class="title">'+esc(t.title)+'</div>';
   const prioHtml = t.priority_abc ? '<span class="prio-abc p'+t.priority_abc+'" data-act="edit" title="Prioridad '+t.priority_abc+'">'+t.priority_abc+'</span>' : '';
   const recBadge = isWeekly(t) ? '<span class="rec" data-act="edit" title="Repite '+t.days_week.map(d=>DOW[d]).join('·')+'">↻ '+t.days_week.map(d=>DOW[d]).join('·')+'</span>' : '';
   const respHtml = t.assignee ? '<span class="rav" data-act="edit" title="Responsable: '+esc(t.assignee)+'">'+esc(iniOf(t.assignee))+'</span>' : '';
   const noteHtml = t.notes ? '<span class="notei" data-act="edit" title="'+esc(t.notes)+'">📝</span>' : '';
   const dueHtml = t.due_date ? '<span class="due2'+(isOverdue(t)?' late':'')+'" data-act="edit" title="Fecha límite">📅 '+fmtDue(t.due_date)+(isOverdue(t)?' · vencida':'')+'</span>' : '';
-  div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+dueHtml+respHtml+noteHtml+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
+  const kids=kidsOf(t.id); const subBadge=kids.length?'<span class="subcount" title="Sub-tareas completadas">☑ '+kids.filter(isDoneNow).length+'/'+kids.length+'</span>':'';
+  const esp=taskEsperaSec(t); const espBadge=(waiting||esp>0)?'<span class="espbadge" title="Tiempo fuera de tu cancha (esperando a un tercero)">⏳ '+fmtDur(esp)+(waiting?' · esperando':'')+'</span>':'';
+  div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+dueHtml+respHtml+noteHtml+subBadge+espBadge+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
   div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
     const a=b.dataset.act;
     if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id);
-    else if(a==='del')delTask(t.id); else if(a==='edit')openTaskEdit(t);}));
+    else if(a==='del')delTask(t.id); else if(a==='edit')openTaskEdit(t);
+    else if(a==='espera')setEspera(t.id); else if(a==='resume')resumeEspera(t.id); else if(a==='addsub')addSubtask(t.id);}));
   return div;
 }
 function renderTasks(){
@@ -839,9 +896,9 @@ function renderTasks(){
   }
   show=show.filter(t=>schedToday(t));                 // recurrentes: solo en sus días
   show=show.filter(t=>!isDoneNow(t) || doneToday(t)); // oculta completadas de días previos
-  sortTasks(show);
-  if(!show.length){ const e=document.createElement("div"); e.className="empty"; e.innerHTML='Sin pendientes aquí.<br>Agrega uno arriba ↑'; list.appendChild(e); return; }
-  show.forEach(t=>list.appendChild(taskRow(t)));
+  const tops=show.filter(t=>!t.parent_task_id); sortTasks(tops);
+  if(!tops.length){ const e=document.createElement("div"); e.className="empty"; e.innerHTML='Sin pendientes aquí.<br>Agrega uno arriba ↑'; list.appendChild(e); return; }
+  tops.forEach(t=>{ list.appendChild(taskRow(t,false)); kidsOf(t.id).slice().sort((a,b)=>taskRank(a)-taskRank(b)).forEach(c=>list.appendChild(taskRow(c,true))); });
 }
 function todayDow(){ return ((new Date().getDay()+6)%7)+1; }
 function isWeekly(t){ return t.recurrence==='semanal' && Array.isArray(t.days_week) && t.days_week.length; }
@@ -939,12 +996,40 @@ function renderMail(){
 }
 function renderNS(){
   const g=$("#nsGrid"); g.innerHTML="";
-  links.forEach(l=>{const a=document.createElement("a");a.className="nslink"+(l.url==='#'?" unset":"");a.title=l.url==='#'?"Clic para configurar el URL":("Abrir "+l.label);
-    a.innerHTML='<span class="nsic">'+(l.icon||'↗')+'</span>'+esc(l.label)+'<span class="arw">'+(l.url==='#'?'✎':'↗')+'</span>';
-    a.addEventListener("click",e=>{e.preventDefault(); if(l.url&&l.url!=='#')window.open(l.url,'_blank'); else setLinkUrl(l);});
-    a.addEventListener("contextmenu",e=>{e.preventDefault();setLinkUrl(l);});
-    g.appendChild(a);});
+  links.slice().sort((a,b)=>(a.sort||0)-(b.sort||0)).forEach(l=>{
+    const d=document.createElement("div"); d.className="nslink"+((!l.url||l.url==='#')?" unset":"");
+    d.title=(l.url&&l.url!=='#')?("Abrir "+l.label):"Sin URL — toca ✎ para configurar";
+    d.innerHTML='<span class="nsic">'+(l.icon||'↗')+'</span><span class="nslbl">'+esc(l.label)+'</span><button class="nsedit" data-a="edit" title="Editar / mover / borrar">✎</button>';
+    d.addEventListener("click",e=>{ if(e.target.closest('[data-a="edit"]')){openNsEdit(l);return;} if(l.url&&l.url!=='#')window.open(l.url,'_blank'); else openNsEdit(l); });
+    g.appendChild(d); });
+  const add=document.createElement("button"); add.className="nslink nsadd"; add.type="button";
+  add.innerHTML='<span class="nsic">＋</span><span class="nslbl">Agregar acceso</span>';
+  add.addEventListener("click",()=>openNsEdit(null)); g.appendChild(add);
 }
+function openNsEdit(l){ nsId=l?l.id:null;
+  $("#nsTitle").textContent=l?'Editar acceso':'Nuevo acceso';
+  $("#nsName").value=l?(l.label||''):''; $("#nsUrl").value=(l&&l.url&&l.url!=='#')?l.url:''; $("#nsIcon").value=l?(l.icon||''):'';
+  const show=l?'':'none'; $("#nsUp").style.display=show; $("#nsDown").style.display=show; $("#nsDel").style.display=show;
+  $("#nsModal").classList.remove("hidden"); setTimeout(()=>$("#nsName").focus(),30); }
+async function saveNs(){ const label=$("#nsName").value.trim(); if(!label){toast('Ponle un nombre');return;}
+  const url=$("#nsUrl").value.trim()||'#'; const icon=$("#nsIcon").value.trim()||'↗';
+  if(nsId){ await sb.from('cmd_ns_link').update({label,url,icon}).eq('id',nsId); }
+  else { const mx=links.reduce((m,x)=>Math.max(m,x.sort||0),0); await sb.from('cmd_ns_link').insert({label,url,icon,sort:mx+1}); }
+  $("#nsModal").classList.add("hidden"); toast('Acceso guardado'); await refresh(); }
+async function delNs(){ if(!nsId)return; if(!confirm('¿Eliminar este acceso?'))return;
+  await sb.from('cmd_ns_link').delete().eq('id',nsId); $("#nsModal").classList.add("hidden"); toast('Acceso eliminado'); await refresh(); }
+async function moveNs(dir){ if(!nsId)return; const s=links.slice().sort((a,b)=>(a.sort||0)-(b.sort||0));
+  const i=s.findIndex(x=>x.id===nsId), j=i+dir; if(i<0||j<0||j>=s.length)return;
+  const A=s[i],B=s[j],sA=A.sort||0,sB=B.sort||0;
+  await sb.from('cmd_ns_link').update({sort:sB}).eq('id',A.id); await sb.from('cmd_ns_link').update({sort:sA}).eq('id',B.id);
+  await refresh(); openNsEdit(links.find(x=>x.id===nsId)); }
+function renderAgenda(){ const el=$("#agendaList"); if(!el)return;
+  $("#agendaCount").textContent=meetings.length||'';
+  if(meetings.length){ el.innerHTML=meetings.map(m=>'<div class="agrow"><span class="agt">'+(m.all_day?'Todo el día':fmtEventTime(m.inicio))+'</span><span class="agttl">'+esc(m.titulo||'(sin título)')+'</span></div>').join(''); }
+  else if(calConnected){ el.innerHTML='<div class="empty" style="padding:12px 8px">Sin juntas hoy 🎉</div>'; }
+  else { el.innerHTML='<div class="empty" style="padding:12px 8px">Conecta tu Google Calendar (en el CMO, menú ⚙) para ver aquí tus juntas del día.</div>'; } }
+function fmtEventTime(ini){ if(!ini)return''; if(!(''+ini).includes('T'))return 'Todo el día';
+  try{ return new Date(ini).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }catch(e){return '';} }
 function renderBars(){
   const bars=$("#bars"),leg=$("#legend");
   const withTime=projects.map(p=>({p,s:projSecToday(p)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s);
@@ -991,7 +1076,7 @@ function renderNowSelect(){
 function paintOtros(){const on=active&&active.kind==='otros';const ob=$("#otrosBtn");
   ob.classList.toggle("active",on);ob.setAttribute("aria-pressed",on?"true":"false");
   $("#oTxt").textContent=on?"EN OTROS…":"OTROS"; $("#oIcon").textContent=on?"■":"◉";}
-function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); renderFilters(); renderMail(); renderNS(); renderTopStats(); renderNow(); renderBars(); renderDayTotal(); renderWeek(); paintOtros(); }
+function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); renderFilters(); renderMail(); renderNS(); renderAgenda(); renderTopStats(); renderNow(); renderBars(); renderDayTotal(); renderWeek(); paintOtros(); }
 
 // ---------- listeners ----------
 $("#addBtn").addEventListener("click",addTask);
@@ -1008,6 +1093,13 @@ $("#resumenClose").addEventListener("click",()=>$("#resumenModal").classList.add
 $("#resumenModal").addEventListener("click",e=>{ if(e.target.id==='resumenModal')$("#resumenModal").classList.add("hidden"); });
 $("#taskModal").addEventListener("click",e=>{ if(e.target.id==='taskModal')$("#taskModal").classList.add("hidden"); });
 $("#notasModal").addEventListener("click",e=>{ if(e.target.id==='notasModal')$("#notasModal").classList.add("hidden"); });
+$("#nsClose").addEventListener("click",()=>$("#nsModal").classList.add("hidden"));
+$("#nsCancel").addEventListener("click",()=>$("#nsModal").classList.add("hidden"));
+$("#nsSave").addEventListener("click",saveNs);
+$("#nsDel").addEventListener("click",delNs);
+$("#nsUp").addEventListener("click",()=>moveNs(-1));
+$("#nsDown").addEventListener("click",()=>moveNs(1));
+$("#nsModal").addEventListener("click",e=>{ if(e.target.id==='nsModal')$("#nsModal").classList.add("hidden"); });
 $("#newProj").addEventListener("change", e=>{ if(e.target.value==='__new__') newCategory(null); });
 const ob=$("#otrosBtn");
 ob.addEventListener("click",toggleOtros);
