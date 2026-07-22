@@ -655,9 +655,10 @@ async function finishTask(taskId){
 async function closeEspera(tk){ if(!tk||!tk.espera_desde)return;
   await sb.from('cmd_time_entry').insert({ task_id:tk.id, project_id:tk.project_id, kind:'espera', label:'espera', started_at:tk.espera_desde, ended_at:nowISO() }); }
 async function setEspera(taskId){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
+  const de=prompt("¿A quién/qué estás esperando? (proveedor, cliente, compañero… opcional)", tk.espera_de||"");
   if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
-  await sb.from('cmd_task').update({ status:'pending', espera_desde:nowISO() }).eq('id',taskId);
-  toast("⏳ En espera — fuera de tu cancha"); await refresh(); paintOtros(); }
+  await sb.from('cmd_task').update({ status:'pending', espera_desde:nowISO(), espera_de:(de&&de.trim())||null }).eq('id',taskId);
+  toast("⏳ En espera"+(de&&de.trim()?(" · "+de.trim()):"")); await refresh(); paintOtros(); }
 async function resumeEspera(taskId){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
   await closeEspera(tk); await sb.from('cmd_task').update({ espera_desde:null }).eq('id',taskId);
   toast("↩ De vuelta en tu cancha"); await refresh(); }
@@ -866,7 +867,7 @@ function taskRow(t, isSub){
   const noteHtml = t.notes ? '<span class="notei" data-act="edit" title="'+esc(t.notes)+'">📝</span>' : '';
   const dueHtml = t.due_date ? '<span class="due2'+(isOverdue(t)?' late':'')+'" data-act="edit" title="Fecha límite">📅 '+fmtDue(t.due_date)+(isOverdue(t)?' · vencida':'')+'</span>' : '';
   const kids=kidsOf(t.id); const subBadge=kids.length?'<span class="subcount" title="Sub-tareas completadas">☑ '+kids.filter(isDoneNow).length+'/'+kids.length+'</span>':'';
-  const esp=taskEsperaSec(t); const espBadge=(waiting||esp>0)?'<span class="espbadge" title="Tiempo fuera de tu cancha (esperando a un tercero)">⏳ '+fmtDur(esp)+(waiting?' · esperando':'')+'</span>':'';
+  const esp=taskEsperaSec(t); const espBadge=(waiting||esp>0)?'<span class="espbadge" title="Tiempo fuera de tu cancha (esperando a un tercero)">⏳ '+fmtDur(esp)+(waiting?' · esperando'+(t.espera_de?' a '+esc(t.espera_de):''):'')+'</span>':'';
   div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+dueHtml+respHtml+noteHtml+subBadge+espBadge+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
   div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
     const a=b.dataset.act;
