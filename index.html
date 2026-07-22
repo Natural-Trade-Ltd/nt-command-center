@@ -120,6 +120,11 @@
   .task.sub{position:relative;margin-left:22px;border-style:dashed}
   .task.sub::before{content:"↳";position:absolute;left:-15px;top:9px;color:var(--faint);font-size:13px}
   .task.waiting{border-color:#8a6a2a;background:#241c0e;box-shadow:inset 3px 0 0 #e0b25b}
+  .task.paused{border-color:#6c5f37;background:#191710;box-shadow:inset 3px 0 0 #cdb26a}
+  :root.light .task.paused{background:#f6f0dd;border-color:#d8c88f}
+  .task.paused .elapsed{color:#cdb26a}
+  .parbadge{font-size:10px;font-weight:700;color:#8fb4ff;background:rgba(120,150,220,.14);border:1px solid rgba(120,150,220,.32);padding:1px 7px;border-radius:999px;cursor:pointer}
+  .pausebadge{font-size:10px;font-weight:700;color:#cdb26a;background:rgba(205,178,106,.14);border:1px solid rgba(205,178,106,.3);padding:1px 7px;border-radius:999px}
   .task.waiting .title{color:#d8b25e}
   .subcount{font-size:10px;padding:2px 7px;border-radius:999px;background:#16241c;color:var(--good);border:1px solid var(--good-dim);white-space:nowrap}
   .espbadge{font-size:10px;padding:2px 7px;border-radius:999px;background:#2a2110;color:#e0b25b;border:1px solid #5a4620;font-family:var(--mono);white-space:nowrap}
@@ -613,18 +618,24 @@ async function refresh(){
     sb.from('cmo_google_token').select('owner_id').maybeSingle(),
   ]);
   projects = p.data||[]; tasks = t.data||[]; entries = e.data||[]; links = l.data||[]; mails = m.data||[]; meetings = mt.data||[]; calConnected = !!(gk&&gk.data);
-  active = entries.find(x=>!x.ended_at) || null;
+  active = focusedEntry();
   $("#app").classList.remove("loading");
   renderAll();
 }
 const proj = id => projects.find(p=>p.id===id);
 function closedSecToday(projectId){ const ts=todayStartISO(); return entries.filter(x=>x.ended_at && x.kind==='task' && x.project_id===projectId && x.started_at>=ts).reduce((a,x)=>a+(x.seconds||0),0); }
 function closedOtrosToday(){ const ts=todayStartISO(); return entries.filter(x=>x.ended_at && x.kind==='otros' && x.started_at>=ts).reduce((a,x)=>a+(x.seconds||0),0); }
-function liveDelta(){ return active ? Math.max(0,(Date.now()-new Date(active.started_at).getTime())/1000) : 0; }
-function projSecToday(p){ let s=closedSecToday(p.id); if(active && active.kind==='task' && active.project_id===p.id) s+=liveDelta(); return s; }
-function otrosSecToday(){ let s=closedOtrosToday(); if(active && active.kind==='otros') s+=liveDelta(); return s; }
+// ===== MULTI-CRONO: puede haber varias entradas abiertas a la vez =====
+function liveOf(e){ return e && !e.ended_at ? Math.max(0,(Date.now()-new Date(e.started_at).getTime())/1000) : 0; }
+function openTaskEntry(id){ return entries.find(e=>!e.ended_at && e.kind==='task' && e.task_id===id) || null; }
+function otrosOpen(){ return entries.find(e=>!e.ended_at && e.kind==='otros') || null; }
+function isPar(id){ return !!(tasks.find(t=>t.id===id)||{}).paralelo; }
+function focusedEntry(){ const oo=otrosOpen(); if(oo)return oo; const n=entries.find(e=>!e.ended_at && e.kind==='task' && !isPar(e.task_id)); if(n)return n; return entries.find(e=>!e.ended_at)||null; }
+function liveDelta(){ return liveOf(active); }
+function projSecToday(p){ let s=closedSecToday(p.id); entries.forEach(e=>{ if(!e.ended_at && e.kind==='task' && e.project_id===p.id) s+=liveOf(e); }); return s; }
+function otrosSecToday(){ return closedOtrosToday()+liveOf(otrosOpen()); }
 function taskSec(task){ let s=entries.filter(x=>x.ended_at && x.kind==='task' && x.task_id===task.id).reduce((a,x)=>a+(x.seconds||0),0);
-  if(active && active.kind==='task' && active.task_id===task.id) s+=liveDelta();
+  s+=liveOf(openTaskEntry(task.id));
   tasks.forEach(c=>{ if(c.parent_task_id===task.id) s+=taskSec(c); }); return s; }
 function kidsOf(id){ return tasks.filter(c=>c.parent_task_id===id); }
 function taskEsperaSec(t){ let s=entries.filter(x=>x.ended_at && x.kind==='espera' && x.task_id===t.id).reduce((a,x)=>a+(x.seconds||0),0);
@@ -633,26 +644,27 @@ function fmtDur(sec){ sec=Math.max(0,Math.floor(sec)); const d=Math.floor(sec/86
 function totalWorkToday(){ return projects.reduce((a,p)=>a+projSecToday(p),0); }
 
 // ================= ACTIONS =================
-async function closeActive(revertTaskTo='pending'){
-  if(!active) return;
-  const id=active.id, wasTask=active.task_id;
-  await sb.from('cmd_time_entry').update({ ended_at: nowISO() }).eq('id', id);
-  if(wasTask && revertTaskTo){ await sb.from('cmd_task').update({ status: revertTaskTo }).eq('id', wasTask); }
-  active=null;
+async function endEntry(e){ if(e&&!e.ended_at) await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',e.id); }
+// pausa las tareas NORMALES en curso (deja las PARALELAS) + detiene OTROS. exceptId = la que voy a iniciar
+async function pauseOthers(exceptId){
+  for(const e of entries.filter(x=>!x.ended_at && x.kind==='task')){
+    if(e.task_id!==exceptId && !isPar(e.task_id)){ await endEntry(e); await sb.from('cmd_task').update({ status:'paused' }).eq('id',e.task_id); }
+  }
+  const oo=otrosOpen(); if(oo)await endEntry(oo);
 }
 async function startTask(taskId){
   const tk=tasks.find(x=>x.id===taskId); if(!tk||tk.status==='done')return;
-  await closeActive('pending');
+  if(!tk.paralelo) await pauseOthers(taskId);
   if(tk.espera_desde) await closeEspera(tk);
+  if(!openTaskEntry(taskId)) await sb.from('cmd_time_entry').insert({ task_id:taskId, project_id:tk.project_id, kind:'task', label:tk.title, started_at:nowISO() });
   await sb.from('cmd_task').update({ status:'running', done_at:null, espera_desde:null }).eq('id',taskId);
-  await sb.from('cmd_time_entry').insert({ task_id:taskId, project_id:tk.project_id, kind:'task', label:tk.title, started_at:nowISO() });
   toast("▶ Iniciada: "+tk.title); await refresh(); paintOtros();
 }
-async function pauseTask(taskId){ await closeActive('pending'); toast("⏸ Pausada"); await refresh(); paintOtros(); }
+async function pauseTask(taskId){ const e=openTaskEntry(taskId); if(e)await endEntry(e); await sb.from('cmd_task').update({ status:'paused' }).eq('id',taskId); toast("⏸ Pausada"); await refresh(); paintOtros(); }
 async function finishTask(taskId){
   const tk=tasks.find(x=>x.id===taskId);
   const kids=kidsOf(taskId); if(kids.length && kids.some(c=>!isDoneNow(c))){ toast("Faltan sub-tareas por completar"); return; }
-  if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
+  const oe=openTaskEntry(taskId); if(oe)await endEntry(oe);
   if(tk && tk.espera_desde) await closeEspera(tk);
   if(tk && isWeekly(tk)) await sb.from('cmd_task').update({ done_at:nowISO(), status:'pending', espera_desde:null }).eq('id',taskId);
   else await sb.from('cmd_task').update({ status:'done', done_at:nowISO(), espera_desde:null }).eq('id',taskId);
@@ -660,21 +672,26 @@ async function finishTask(taskId){
 }
 async function closeEspera(tk){ if(!tk||!tk.espera_desde)return;
   await sb.from('cmd_time_entry').insert({ task_id:tk.id, project_id:tk.project_id, kind:'espera', label:'espera', started_at:tk.espera_desde, ended_at:nowISO() }); }
-async function setEspera(taskId){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
-  const de=prompt("¿A quién/qué estás esperando? (proveedor, cliente, compañero… opcional)", tk.espera_de||"");
-  if(active && active.task_id===taskId){ await sb.from('cmd_time_entry').update({ ended_at:nowISO() }).eq('id',active.id); active=null; }
-  await sb.from('cmd_task').update({ status:'pending', espera_desde:nowISO(), espera_de:(de&&de.trim())||null }).eq('id',taskId);
-  toast("⏳ En espera"+(de&&de.trim()?(" · "+de.trim()):"")); await refresh(); paintOtros(); }
+async function setEspera(taskId,quick){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
+  let de=tk.espera_de||null;
+  if(!quick){ const r=prompt("¿A quién/qué estás esperando? (proveedor, cliente, compañero… opcional)", tk.espera_de||""); if(r!==null)de=(r&&r.trim())||null; }
+  const oe=openTaskEntry(taskId); if(oe)await endEntry(oe);
+  await sb.from('cmd_task').update({ status:'pending', espera_desde:nowISO(), espera_de:de }).eq('id',taskId);
+  toast("⏳ En espera"+(de?(" · "+de):"")); await refresh(); paintOtros(); }
 async function resumeEspera(taskId){ const tk=tasks.find(x=>x.id===taskId); if(!tk)return;
   await closeEspera(tk); await sb.from('cmd_task').update({ espera_desde:null }).eq('id',taskId);
   toast("↩ De vuelta en tu cancha"); await refresh(); }
+async function toggleParalelo(id){ const tk=tasks.find(x=>x.id===id); if(!tk)return; const v=!tk.paralelo;
+  await sb.from('cmd_task').update({ paralelo:v }).eq('id',id);
+  toast(v?"∥ En paralelo: no se pausará al iniciar otra":"Ya no corre en paralelo"); await refresh(); }
 async function addSubtask(parentId){ const tk=tasks.find(x=>x.id===parentId); if(!tk)return;
   const title=prompt("Nueva sub-tarea de «"+tk.title+"»:",""); if(title===null)return; const tt=title.trim(); if(!tt)return;
   await sb.from('cmd_task').insert({ parent_task_id:parentId, project_id:tk.project_id, title:tt, status:'pending', sort:0 });
   toast("＋ Sub-tarea agregada"); await refresh(); }
 async function toggleOtros(){
-  if(active && active.kind==='otros'){ await closeActive(); toast("OTROS detenido"); }
-  else { await closeActive('pending'); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
+  const oo=otrosOpen();
+  if(oo){ await endEntry(oo); toast("OTROS detenido"); }
+  else { await pauseOthers(null); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
   await refresh(); paintOtros();
 }
 async function addTask(){
@@ -720,7 +737,7 @@ function iniOf(s){ return (s||'?').replace(/[<>]/g,'').split(/\s+/).map(x=>x[0]|
 function localDate(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtDue(d){ if(!d)return ''; const p=d.split('-'); return p[2]+' '+['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][(+p[1])-1]; }
 function isOverdue(t){ return t.due_date && t.due_date < localDate() && !isDoneNow(t); }
-function taskRank(t){ return isDoneNow(t)?2:(t.status==='running'?0:1); }
+function taskRank(t){ return isDoneNow(t)?3:(t.status==='running'?0:(t.status==='paused'?0.5:((t.espera_desde&&t.status!=='done')?1.5:1))); }
 function prioRank(t){ const r={A:0,B:1,C:2}[t.priority_abc]; return r==null?3:r; }
 function sortTasks(arr){
   if(sortMode==='tiempo') return arr.sort((a,b)=>taskRank(a)-taskRank(b) || taskSec(b)-taskSec(a));
@@ -746,6 +763,7 @@ function openTaskEdit(t){
     '<label>Repetir en días (vacío = una sola vez)</label><div id="edDays" class="daysrow">'+daysHtml+'</div>'+
     '<label>Notas</label><textarea id="edNotes" rows="3" placeholder="Notas de la tarea…">'+esc(t.notes||'')+'</textarea>'+
     '<label>Enlace (conversación de Claude / URL)</label><input id="edLink" placeholder="https://…" value="'+esc(t.link||'')+'">'+
+    '<label>Multi-cronómetro</label><label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.35;cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0"><input type="checkbox" id="edPar" '+(t.paralelo?'checked':'')+' style="width:16px;height:16px;margin-top:1px;flex:none"><span>Correr <b>en paralelo</b> (segundo plano): no se pausa al iniciar otra actividad, sigue contando mientras trabajas en algo más.</span></label>'+
     '<div class="mbtns"><button class="mbtn" id="edDelete" style="margin-right:auto;border-color:var(--crit-dim);color:var(--crit)">🗑 Eliminar</button><button class="mbtn" id="edCancel">Cancelar</button><button class="mbtn primary" id="edSave">Guardar</button></div>';
   const paint=()=>$("#edDays").querySelectorAll('[data-d]').forEach(b=>b.classList.toggle('on',edDays.includes(+b.dataset.d)));
   paint();
@@ -760,7 +778,8 @@ async function saveTaskEdit(){
   const upd={ title:$("#edTitle").value.trim()||'(sin título)', assignee:$("#edResp").value.trim()||null,
     priority_abc:$("#edPrio").value||null, project_id:$("#edCat").value||null, due_date:$("#edDue").value||null,
     notes:$("#edNotes").value.trim()||null, link:$("#edLink").value.trim()||null,
-    recurrence:edDays.length?'semanal':'unica', days_week:edDays.length?edDays.slice():null };
+    recurrence:edDays.length?'semanal':'unica', days_week:edDays.length?edDays.slice():null,
+    paralelo:!!($("#edPar")&&$("#edPar").checked) };
   const {error}=await sb.from('cmd_task').update(upd).eq('id',edId);
   if(error){ toast('No se pudo guardar: '+error.message); return; }
   $("#taskModal").classList.add("hidden"); toast('Cambios guardados'); await refresh();
@@ -892,19 +911,16 @@ function renderNow(){
   else { txt.textContent="Sin actividad"; tt.textContent="00:00:00"; }
 }
 function refreshLive(){
-  if(active){
-    const el=document.querySelector('.task[data-id="'+active.task_id+'"] .elapsed');
-    if(el){const tk=tasks.find(x=>x.id===active.task_id); if(tk)el.textContent=fmt(taskSec(tk));}
-  }
+  entries.forEach(e=>{ if(!e.ended_at && e.kind==='task'){ const el=document.querySelector('.task[data-id="'+e.task_id+'"] .elapsed'); if(el){const tk=tasks.find(x=>x.id===e.task_id); if(tk)el.textContent=fmt(taskSec(tk));} } });
   $("#oTime").textContent=fmt(otrosSecToday());
   projects.forEach(p=>{const v=document.querySelector('.pcard[data-id="'+p.id+'"] .ptime .val'); if(v)v.textContent=fmtHM(catSecToday(p.id));});
   renderBars(); renderDayTotal(); renderTopStats(); renderWeek();
 }
 function taskRow(t, isSub){
   const p=proj(t.project_id); const dom=p?DOMAINS[p.domain]:{name:'—',color:'#33465c',dim:'#1a2636'};
-  const done=isDoneNow(t), running=(t.status==='running'), waiting=(!!t.espera_desde && t.status!=='done');
+  const done=isDoneNow(t), running=(t.status==='running'), waiting=(!!t.espera_desde && t.status!=='done'), paused=(t.status==='paused');
   const div=document.createElement("div");
-  div.className="task"+(running?" running":"")+(done?" done":"")+(waiting?" waiting":"")+(isSub?" sub":"");
+  div.className="task"+(running?" running":"")+(paused?" paused":"")+(done?" done":"")+(waiting?" waiting":"")+(isSub?" sub":"");
   div.dataset.id=t.id; div.style.setProperty("--dom",dom.color); div.style.setProperty("--dom-dim",dom.dim);
   const editBtn='<button class="tbtn" data-act="edit" title="Editar (responsable, prioridad, notas, repetir, enlace)">✎</button>';
   const subBtn=(!isSub)?'<button class="tbtn txt" data-act="addsub" title="Agregar sub-tarea">＋sub</button>':'';
@@ -922,12 +938,14 @@ function taskRow(t, isSub){
   const dueHtml = t.due_date ? '<span class="due2'+(isOverdue(t)?' late':'')+'" data-act="edit" title="Fecha límite">📅 '+fmtDue(t.due_date)+(isOverdue(t)?' · vencida':'')+'</span>' : '';
   const kids=kidsOf(t.id); const subBadge=kids.length?'<span class="subcount" title="Sub-tareas completadas">☑ '+kids.filter(isDoneNow).length+'/'+kids.length+'</span>':'';
   const esp=taskEsperaSec(t); const espBadge=(waiting||esp>0)?'<span class="espbadge" title="Tiempo fuera de tu cancha (esperando a un tercero)">⏳ '+fmtDur(esp)+(waiting?' · esperando'+(t.espera_de?' a '+esc(t.espera_de):''):'')+'</span>':'';
-  div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+dueHtml+respHtml+noteHtml+subBadge+espBadge+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
+  const parBadge=t.paralelo?'<span class="parbadge" data-act="par" title="Corre en paralelo (segundo plano): NO se pausa al iniciar otra. Clic para quitar.">∥ paralelo</span>':'';
+  const pauseBadge=paused?'<span class="pausebadge" title="En pausa · retómala con ▶">⏸ en pausa</span>':'';
+  div.innerHTML='<div class="body"><div class="trow">'+prioHtml+titleHtml+'</div><div class="meta"><span class="tag">'+esc(p?p.name:'Sin proyecto')+'</span>'+recBadge+dueHtml+respHtml+noteHtml+subBadge+parBadge+pauseBadge+espBadge+'<span class="elapsed">'+fmt(taskSec(t))+'</span></div></div><div class="ctrls">'+ctrl+'</div>';
   div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();
     const a=b.dataset.act;
     if(a==='start')startTask(t.id); else if(a==='pause')pauseTask(t.id); else if(a==='finish')finishTask(t.id);
     else if(a==='del')delTask(t.id); else if(a==='edit')openTaskEdit(t);
-    else if(a==='espera')setEspera(t.id); else if(a==='resume')resumeEspera(t.id); else if(a==='addsub')addSubtask(t.id);}));
+    else if(a==='espera')setEspera(t.id); else if(a==='resume')resumeEspera(t.id); else if(a==='addsub')addSubtask(t.id); else if(a==='par')toggleParalelo(t.id);}));
   return div;
 }
 function renderTasks(){
@@ -1128,7 +1146,7 @@ function renderNowSelect(){
   const o=document.createElement("option"); o.value="__new__"; o.textContent="＋ Nueva categoría…"; sel.appendChild(o);
   if(selProj && projects.some(p=>p.id===selProj&&!p.archived)) sel.value=selProj; else if(cur && cur!=='__new__') sel.value=cur;
 }
-function paintOtros(){const on=active&&active.kind==='otros';const ob=$("#otrosBtn");
+function paintOtros(){const on=!!otrosOpen();const ob=$("#otrosBtn");
   ob.classList.toggle("active",on);ob.setAttribute("aria-pressed",on?"true":"false");
   $("#oTxt").textContent=on?"EN OTROS…":"OTROS"; $("#oIcon").textContent=on?"■":"◉";}
 function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); renderFilters(); renderMail(); renderNS(); renderAgenda(); renderTopStats(); renderNow(); renderBars(); renderDayTotal(); renderWeek(); paintOtros(); }
@@ -1154,51 +1172,84 @@ body{background:#0a120d}
 .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .name{font-size:12px;color:#9fb6a8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;font-weight:600}
 .count{font-size:10px;font-weight:800;color:#66c093;background:rgba(87,176,131,.15);border:1px solid rgba(87,176,131,.32);padding:2px 8px;border-radius:999px;white-space:nowrap}
-.timer{font-size:37px;font-weight:800;letter-spacing:.5px;font-variant-numeric:tabular-nums;text-align:center;line-height:1;margin:auto 0}
+.timer{font-size:34px;font-weight:800;letter-spacing:.5px;font-variant-numeric:tabular-nums;text-align:center;line-height:1;margin:3px 0}
 .card.otros .timer{color:#e6be6f}
 .card.idle .timer{color:#5f7568}
-.row{display:flex;gap:7px;margin-top:auto}
+.frow{display:flex;gap:6px}
+.mbtn{border:none;border-radius:8px;padding:7px 6px;font-size:12px;font-weight:800;cursor:pointer;transition:.15s}
+.mbtn:hover{filter:brightness(1.12)}
+.mbtn.pause{flex:none;background:rgba(140,165,225,.18);color:#a9c1ff;border:1px solid rgba(140,165,225,.36)}
+.mbtn.esp{flex:none;background:rgba(224,178,91,.15);color:#e6be6f;border:1px solid rgba(224,178,91,.36)}
+.mbtn.done2{flex:1;background:#57b083;color:#04130a}
+.others{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin:3px 0}
+.olbl{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#6f8578}
+.oitem{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:7px;padding:5px 7px;cursor:pointer}
+.oitem:hover{background:rgba(255,255,255,.09)}
+.odot{width:7px;height:7px;border-radius:50%;flex:none}
+.odot.run{background:#57b083;box-shadow:0 0 0 3px rgba(87,176,131,.22)}
+.odot.pause{background:#cdb26a}
+.oname{flex:1;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.otime{font-size:11px;font-variant-numeric:tabular-nums;color:#9fb6a8;font-weight:700}
+.obtn{border:none;background:transparent;color:#9fb6a8;font-size:13px;cursor:pointer;padding:1px 4px;border-radius:5px}
+.obtn:hover{background:rgba(255,255,255,.12);color:#eaf3ec}
+.foot{display:flex;gap:7px}
 .pbtn{flex:1;border:none;border-radius:9px;padding:8px 5px;font-size:12px;font-weight:800;cursor:pointer;transition:.15s;white-space:nowrap}
 .pbtn.otros{background:rgba(224,178,91,.15);color:#e6be6f;border:1px solid rgba(224,178,91,.36)}
 .pbtn.otros.on{background:#e6be6f;color:#2a2010}
-.pbtn.done{background:#57b083;color:#04130a}
-.pbtn.done:hover,.pbtn.otros:hover{filter:brightness(1.1)}
+.pbtn.open{background:#57b083;color:#04130a}
+.pbtn:hover{filter:brightness(1.1)}
 .light body{background:#eef4ef}
 .light .card{background:linear-gradient(160deg,#ffffff,#e8f1ea);color:#14201a;border-color:#cbe0d2}
 .light .name{color:#5c7466}
-.light .card.idle .timer{color:#9db3a5}`;
-const PIP_HTML=`<div class="card idle" id="pipCard"><div class="top"><div class="name" id="pipName">Sin actividad</div><div class="count" id="pipCount">0 pend</div></div><div class="timer" id="pipTimer">00:00:00</div><div class="row"><button class="pbtn otros" id="pipOtros">◉ OTROS</button><button class="pbtn done" id="pipDone">▸ Abrir portal</button></div></div>`;
+.light .card.idle .timer{color:#9db3a5}
+.light .oitem{background:rgba(0,0,0,.035);border-color:rgba(0,0,0,.08)}
+.light .oitem:hover{background:rgba(0,0,0,.07)}
+.light .otime,.light .obtn{color:#5c7466}`;
+const PIP_HTML=`<div class="card idle" id="pipCard"><div class="top"><div class="name" id="pipName">Sin actividad</div><div class="count" id="pipCount">0 pend</div></div><div class="timer" id="pipTimer">00:00:00</div><div class="frow" id="pipFRow"><button class="mbtn pause" id="pipPause" title="Pausar">⏸</button><button class="mbtn esp" id="pipEsp" title="No está en mi cancha (en espera)">⏳</button><button class="mbtn done2" id="pipDone" title="Terminar y volver al portal">✓ Terminar</button></div><div class="others" id="pipOthers"></div><div class="foot"><button class="pbtn otros" id="pipOtros">◉ OTROS</button><button class="pbtn open" id="pipOpen">▸ Portal</button></div></div>`;
+let pipOthersSig='';
+function pipToggle(id){ const t=tasks.find(x=>x.id===id); if(!t)return; if(t.status==='running')pauseTask(id); else startTask(id); }
+function fmtShort(sec){sec=Math.max(0,Math.floor(sec));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h>0?(h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')):(String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'));}
 async function openPip(){
   if(!('documentPictureInPicture' in window)){ toast("Tu navegador no soporta la ventana flotante siempre-visible. Usa Chrome o Edge."); return; }
   if(pipWin){ try{pipWin.focus();}catch(e){} return; }
-  let pw; try{ pw=await documentPictureInPicture.requestWindow({width:266,height:186}); }
+  let pw; try{ pw=await documentPictureInPicture.requestWindow({width:282,height:300}); }
   catch(e){ toast("No se pudo abrir la ventana flotante."); return; }
-  pipWin=pw;
+  pipWin=pw; pipOthersSig='';
   const st=pw.document.createElement('style'); st.textContent=PIP_CSS; pw.document.head.appendChild(st);
   pw.document.body.innerHTML=PIP_HTML;
-  pw.document.getElementById('pipOtros').addEventListener('click',()=>{ toggleOtros(); });
-  pw.document.getElementById('pipDone').addEventListener('click',async()=>{
-    if(active&&active.kind==='task'){ const id=active.task_id; try{ await finishTask(id); }catch(e){} }
-    try{ window.focus(); }catch(e){}
-  });
+  const g=id=>pw.document.getElementById(id);
+  g('pipOtros').addEventListener('click',()=>toggleOtros());
+  g('pipOpen').addEventListener('click',()=>{ try{window.focus();}catch(e){} });
+  g('pipPause').addEventListener('click',()=>{ if(active&&active.kind==='task')pauseTask(active.task_id); });
+  g('pipEsp').addEventListener('click',()=>{ if(active&&active.kind==='task')setEspera(active.task_id,true); });
+  g('pipDone').addEventListener('click',async()=>{ if(active&&active.kind==='task'){ try{await finishTask(active.task_id);}catch(e){} } try{window.focus();}catch(e){} });
   pw.addEventListener('pagehide',()=>{ pipWin=null; const b=$("#pipBtn"); if(b)b.classList.remove('on'); });
   const b=$("#pipBtn"); if(b)b.classList.add('on');
   updatePip();
 }
 function updatePip(){
   if(!pipWin) return; const d=pipWin.document; const card=d.getElementById('pipCard'); if(!card) return;
+  d.documentElement.className=document.documentElement.className;
+  const fid=(active&&active.kind==='task')?active.task_id:null;
   let name='Sin actividad', time='00:00:00', mode='idle';
-  if(active&&active.kind==='task'){ const tk=tasks.find(x=>x.id===active.task_id); name=tk?tk.title:(active.label||'Tarea'); time=fmt(taskSec({id:active.task_id})); mode='run'; }
+  if(fid){ const tk=tasks.find(x=>x.id===fid); name=tk?tk.title:(active.label||'Tarea'); time=fmt(taskSec({id:fid})); mode='run'; }
   else if(active&&active.kind==='otros'){ name='OTROS · interrupción'; time=fmt(otrosSecToday()); mode='otros'; }
   d.getElementById('pipName').textContent=name;
   d.getElementById('pipTimer').textContent=time;
   card.className='card '+mode;
   const pend=tasks.filter(x=>isPendingNow(x)&&!x.parent_task_id).length;
   d.getElementById('pipCount').textContent=pend+' pend';
-  const on=active&&active.kind==='otros';
-  const ob=d.getElementById('pipOtros'); ob.textContent=on?'■ Detener':'◉ OTROS'; ob.className='pbtn otros'+(on?' on':'');
-  const done=d.getElementById('pipDone'); done.textContent=(active&&active.kind==='task')?'✓ Terminar':'▸ Abrir portal';
-  d.documentElement.className=document.documentElement.className;
+  d.getElementById('pipFRow').style.display=fid?'flex':'none';
+  const on=!!otrosOpen(); const ob=d.getElementById('pipOtros'); ob.textContent=on?'■ Detener':'◉ OTROS'; ob.className='pbtn otros'+(on?' on':'');
+  const others=tasks.filter(t=>!t.parent_task_id&&(t.status==='running'||t.status==='paused')&&t.id!==fid);
+  const box=d.getElementById('pipOthers'); const sig=others.map(t=>t.id+':'+t.status).join('|');
+  if(sig!==pipOthersSig){
+    pipOthersSig=sig;
+    box.innerHTML=others.length?('<div class="olbl">Otras activas · toca para volver</div>'+others.map(t=>{const run=t.status==='running';
+      return '<div class="oitem" data-id="'+t.id+'"><span class="odot '+(run?'run':'pause')+'"></span><span class="oname">'+esc(t.title)+'</span><span class="otime">'+fmtShort(taskSec(t))+'</span><button class="obtn" data-id="'+t.id+'" title="'+(run?'Pausar':'Reanudar')+'">'+(run?'⏸':'▶')+'</button></div>';}).join('')):'';
+    box.querySelectorAll('.obtn').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();pipToggle(b.dataset.id);}));
+    box.querySelectorAll('.oitem').forEach(el=>el.addEventListener('click',()=>{const t=tasks.find(x=>x.id===el.dataset.id);if(t&&t.status==='paused')startTask(el.dataset.id);}));
+  } else { others.forEach(t=>{const el=box.querySelector('.oitem[data-id="'+t.id+'"] .otime');if(el)el.textContent=fmtShort(taskSec(t));}); }
 }
 $("#pipBtn") && $("#pipBtn").addEventListener("click",openPip);
 $("#resumenBtn").addEventListener("click",()=>{ $("#resumenModal").classList.remove("hidden"); renderResumen(); });

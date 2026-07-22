@@ -1,4 +1,4 @@
-const CACHE = 'cmd-shell-v7';
+const CACHE = 'cmd-shell-v8';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {
