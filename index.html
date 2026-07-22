@@ -282,6 +282,9 @@
     font-size:12px;transition:.3s;pointer-events:none;z-index:50;box-shadow:0 10px 30px -10px #000}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   /* auth overlay */
+  .gutter{position:fixed;width:9px;z-index:30;cursor:col-resize;touch-action:none;display:none}
+  .gutter::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:3px;height:42px;border-radius:3px;background:var(--border);transition:background .15s,height .15s}
+  .gutter:hover::after{background:var(--accent);height:64px}
   #gate{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:
     radial-gradient(900px 500px at 50% 0%, #13212f 0%, transparent 60%), var(--bg)}
   .card{width:380px;max-width:92vw;background:linear-gradient(180deg,var(--panel),var(--panel-2));
@@ -396,6 +399,7 @@
     <div class="stat" style="border-right:1px solid var(--border-soft)"><span class="clock" id="clock">--:--:--</span><span class="date" id="date"></span></div>
     <button class="iconbtn" id="resumenBtn" title="Resumen semanal">📊</button>
     <button class="iconbtn" id="notasBtn" title="Notas rápidas (sin tiempo)">📝</button>
+    <button class="iconbtn" id="switchBtn" title="Ir al CMO (Operaciones)">⇄</button>
     <button class="iconbtn" id="themeBtn" title="Cambiar tema claro/oscuro">☀</button>
     <div class="whoami"><span class="em" id="whoEmail"></span><button id="signout">Cerrar sesión</button></div>
   </div>
@@ -589,7 +593,7 @@ async function enterApp(session){
   $("#app").classList.remove("hidden");
   $("#whoEmail").textContent = session.user.email;
   history.replaceState(null,"",location.pathname); // limpia el hash del magic link
-  renderClock(); renderNowSelect();
+  renderClock(); renderNowSelect(); initLayout();
   await refresh();
   if(!ticking){ ticking=true; setInterval(tick,1000); setInterval(refresh, 60000); }
 }
@@ -820,6 +824,54 @@ function recBtnUI(on){ const b=$("#notaRec"); if(!b)return; b.textContent=on?'�
 async function playVoice(path){ const {data,error}=await sb.storage.from('cmd-audio').createSignedUrl(path,3600); if(error||!data){ toast('No pude cargar el audio'); return; } new Audio(data.signedUrl).play(); }
 
 // ================= RENDER =================
+// ===== LAYOUT AJUSTABLE (anchos de columnas + alto de Agenda, se recuerda por dispositivo) =====
+function initLayout(){
+  const grid=document.querySelector('.grid'); if(!grid||grid.dataset.lay) return;
+  const left=grid.querySelector('.panel.left'), center=grid.querySelector('.panel.center'), right=grid.querySelector('.right');
+  if(!left||!center||!right) return;
+  grid.dataset.lay='1';
+  const KEY='cmd_layout';
+  const saved=()=>{ try{return JSON.parse(localStorage.getItem(KEY)||'{}')||{};}catch(e){return {};} };
+  const store=s=>{ try{localStorage.setItem(KEY,JSON.stringify(s));}catch(e){} };
+  const desktop=()=>window.matchMedia('(min-width:981px)').matches;
+  function apply(){
+    const s=saved();
+    if(desktop()&&s.L&&s.C) grid.style.gridTemplateColumns=s.L+'px '+s.C+'px minmax(320px,1fr)';
+    else grid.style.gridTemplateColumns='';
+    const a=document.getElementById('agendaList'); if(a){ a.style.maxHeight='none'; a.style.resize='vertical'; a.style.overflowY='auto'; a.style.height=((s.agH)?s.agH:170)+'px'; }
+  }
+  const gA=document.createElement('div'), gB=document.createElement('div');
+  gA.className='gutter'; gB.className='gutter'; gA.title=gB.title='Arrastra para ajustar el ancho · doble-clic = restablecer';
+  document.body.appendChild(gA); document.body.appendChild(gB);
+  function position(){
+    if(!desktop()){ gA.style.display='none'; gB.style.display='none'; return; }
+    gA.style.display=''; gB.style.display='';
+    const rl=left.getBoundingClientRect(), rc=center.getBoundingClientRect();
+    gA.style.top=rl.top+'px'; gA.style.height=rl.height+'px'; gA.style.left=(rl.right-4)+'px';
+    gB.style.top=rl.top+'px'; gB.style.height=rl.height+'px'; gB.style.left=(rc.right-4)+'px';
+  }
+  const wds=()=>({L:Math.round(left.getBoundingClientRect().width),C:Math.round(center.getBoundingClientRect().width)});
+  function drag(g,which){
+    g.addEventListener('pointerdown',e=>{ e.preventDefault();
+      const startX=e.clientX, w=wds(), gw=grid.getBoundingClientRect().width;
+      const move=ev=>{ let L=w.L,C=w.C; const dx=ev.clientX-startX;
+        if(which==='A') L=Math.max(320,Math.min(w.L+dx,gw-260-320));
+        else C=Math.max(260,Math.min(w.C+dx,gw-w.L-320));
+        grid.style.gridTemplateColumns=L+'px '+C+'px minmax(320px,1fr)'; position(); };
+      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+        const c=wds(),s=saved(); s.L=c.L; s.C=c.C; store(s); };
+      document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+    });
+    g.addEventListener('dblclick',()=>{ const s=saved(); delete s.L; delete s.C; store(s); grid.style.gridTemplateColumns=''; position(); });
+  }
+  drag(gA,'A'); drag(gB,'B'); apply();
+  const a=document.getElementById('agendaList');
+  if(a&&window.ResizeObserver){ let t; new ResizeObserver(()=>{ clearTimeout(t); t=setTimeout(()=>{ if(a.offsetHeight){ const s=saved(); s.agH=a.offsetHeight; store(s);} },250); }).observe(a); }
+  window.addEventListener('resize',()=>{ apply(); position(); });
+  if(window.ResizeObserver) new ResizeObserver(()=>position()).observe(grid);
+  setTimeout(position,60); setTimeout(position,500);
+}
+
 function renderClock(){const d=new Date();
   $("#clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");
   $("#date").textContent=d.toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"});}
@@ -1109,6 +1161,7 @@ const THEME_KEY='cmd_theme';
 function applyTheme(t){ document.documentElement.classList.toggle('light', t==='light'); const b=$("#themeBtn"); if(b)b.textContent=(t==='light'?'🌙':'☀'); }
 applyTheme(localStorage.getItem(THEME_KEY)||'dark');
 $("#themeBtn").addEventListener("click",()=>{ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(THEME_KEY,next); applyTheme(next); });
+$("#switchBtn").addEventListener("click",()=>{ location.href='https://natural-trade-ltd.github.io/nt-cmo/'; });
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{})); }
 function closeCat(){ $("#catModal").classList.add("hidden"); if($("#newProj").value==='__new__')$("#newProj").selectedIndex=0; }
 $("#catCancel").addEventListener("click",closeCat);
