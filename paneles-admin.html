@@ -212,7 +212,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SB_URL='https://borouviqngtdzfvlmlur.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJvcm91dmlxbmd0ZHpmdmxtbHVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQwMzEwNDAsImV4cCI6MjA2OTYwNzA0MH0._nMHh9U7T3vxY9yjCiHtHPlHZXzqg4IFVQhk9W_hW0c';
 const ADMINS=['jorge@naturaltrade.ca','gerardo@naturaltrade.ca'];
-const sb=createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:'implicit'}});
+const sb=createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,flowType:'implicit'}});
 const $=id=>document.getElementById(id);
 
 /* ===== estructura fija (código) ===== */
@@ -514,13 +514,33 @@ $('sendBtn').onclick=async()=>{const email=$('gemail').value.trim();if(!email)re
 $('linkBtn').onclick=async()=>{const raw=$('glink').value.trim();if(!raw)return;try{const u=new URL(raw);const hash=u.hash.startsWith('#')?u.hash.slice(1):u.hash;const pr=new URLSearchParams(hash);
   const at=pr.get('access_token'),rt=pr.get('refresh_token');if(at&&rt){const {error}=await sb.auth.setSession({access_token:at,refresh_token:rt});if(error)gmsg(error.message,'err');}else gmsg('Ese enlace no trae token.','err');}catch(e){gmsg('Enlace inválido.','err');}};
 $('logout').onclick=()=>sb.auth.signOut();
+let entered=false;
 async function route(session){
   if(session&&ADMINS.includes(session.user.email)){
+    entered=true;
     $('gate').classList.add('hidden');$('app').classList.remove('hidden');$('whoEmail').textContent=session.user.email;
     if(!loaded){loaded=true;const ok=await loadData();if(ok)buildAll();}
   } else if(session){ gmsg('Acceso solo para administradores ('+session.user.email+').','err'); await sb.auth.signOut(); }
-  else { $('gate').classList.remove('hidden');$('app').classList.add('hidden'); }
+  else if(!entered){
+    if(/access_token=/.test(location.hash)) gmsg('Entrando…');
+    else { $('gate').classList.remove('hidden');$('app').classList.add('hidden'); }
+  }
 }
+// Regreso de OAuth (implicit): tomo el token del # yo mismo, determinista.
+async function tryHashSession(){
+  try{
+    const h=new URLSearchParams((location.hash||'').replace(/^#/,''));
+    const at=h.get('access_token'), rt=h.get('refresh_token'), er=h.get('error_description')||h.get('error');
+    if(er){ gmsg(decodeURIComponent(er),'err'); return; }
+    if(at&&rt){ gmsg('Entrando…');
+      const {data,error}=await sb.auth.setSession({access_token:at,refresh_token:rt});
+      history.replaceState(null,'',location.pathname);
+      if(error) gmsg(error.message,'err'); else if(data.session) route(data.session);
+    }
+  }catch(e){ gmsg('Error al entrar: '+e.message,'err'); }
+}
+gmsg('Verificando acceso…');
+tryHashSession();
 sb.auth.getSession().then(({data})=>route(data.session));
 sb.auth.onAuthStateChange((_e,s)=>route(s));
 </script>
