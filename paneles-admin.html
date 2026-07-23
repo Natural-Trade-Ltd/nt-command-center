@@ -212,7 +212,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SB_URL='https://borouviqngtdzfvlmlur.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJvcm91dmlxbmd0ZHpmdmxtbHVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQwMzEwNDAsImV4cCI6MjA2OTYwNzA0MH0._nMHh9U7T3vxY9yjCiHtHPlHZXzqg4IFVQhk9W_hW0c';
 const ADMINS=['jorge@naturaltrade.ca','gerardo@naturaltrade.ca'];
-const sb=createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const sb=createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:'implicit'}});
 const $=id=>document.getElementById(id);
 
 /* ===== estructura fija (código) ===== */
