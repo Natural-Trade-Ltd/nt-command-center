@@ -169,6 +169,7 @@
   <div class="tabs">
     <div class="tab on" id="tabC">📋 Consultar / Cotizar</div>
     <div class="tab" id="tabE">✎ Actualizar insumos</div>
+    <div class="tab" id="tabA">🔎 Análisis de costos</div>
   </div>
 
   <section id="secConsulta">
@@ -203,6 +204,10 @@
 
   <section id="secEditar" class="hidden">
     <div class="panel"><header><span class="h"><span class="ic">⚙</span> Ajustes de la vigencia</span> <span class="pill" style="margin-left:auto">se guarda al momento</span></header><div class="body" id="editBody"></div></div>
+  </section>
+
+  <section id="secAnalisis" class="hidden">
+    <div class="panel"><header><span class="h"><span class="ic">🔎</span> Desglose de costos por item</span> <span class="pill" style="margin-left:auto">confidencial · solo admin</span></header><div class="body" id="analBody"></div></div>
   </section>
 </div>
 <div id="toast"></div>
@@ -265,6 +270,36 @@ function costAS(p,code,v,cont){
     case 'CIF_VERA':return cifVera; case 'DDP_VERA':return inlv('Vera')+cifVera*(1+duty);
   }
   return 0;
+}
+
+/* ===== desglose de costos por componente (admin) — costo = fob+ocean+arancel+terrestre ===== */
+function bdBR(p,d,v){
+  const duty=p.duty||0,vol=volOf(p.thick),sheets=v.pkgs*p.sheets,fob=p.fob*vol;
+  const grpOf={DDP_ENS:'ENS',DDP_ALT:'ALTVER',DDP_VER:'ALTVER',DDP_MER:'PROG'};
+  if(d.type==='fob')return{fob,ocean:0,arancel:0,terrestre:0};
+  if(d.type==='cif')return{fob,ocean:v.freight.ocean[d.grp]/sheets,arancel:0,terrestre:0};
+  const ocean=v.freight.ocean[grpOf[d.base]]/sheets,cif=fob+ocean;
+  let terr=v.freight.dray[d.base]/sheets;
+  if(d.type==='city')terr+=v.freight.inland[d.code]/sheets;
+  return{fob,ocean,arancel:cif*duty,terrestre:terr};
+}
+function bdAS(p,code,v,cont){
+  const F=v.freight,duty=p.duty||0,pcs25=p.pcs25,pcs28=p.pcs28,f25=p.fob25,f28=p.fob28;
+  const div=d=>d==='28'?pcs28:pcs25,inl=k=>F.inl[k].mxn/v.tc/F.inl[k].fac,inlv=k=>inl(k)/div(F.inl[k].div);
+  const cif=(fob,ousd,pcs)=>({fob,ocean:ousd/pcs,arancel:0,terrestre:0});
+  const ddp=(fob,ousd,pcs,legs)=>{const ocean=ousd/pcs;return{fob,ocean,arancel:(fob+ocean)*duty,terrestre:legs.reduce((a,k)=>a+inlv(k),0)};};
+  switch(code){
+    case 'FOB':return{fob:cont==='25'?f25:f28,ocean:0,arancel:0,terrestre:0};
+    case 'CIF_ENS':return cif(f25,F.ocean.Ens25,pcs25);   case 'DDP_ENS':return ddp(f25,F.ocean.Ens25,pcs25,['Ens']);
+    case 'CIF_MANZ25':return cif(f25,F.ocean.Manz25,pcs25);case 'DDP_MANZ25':return ddp(f25,F.ocean.Manz25,pcs25,['Manz25']);
+    case 'MONT':return ddp(f25,F.ocean.Manz25,pcs25,['Manz25','Mont']); case 'GDL':return ddp(f25,F.ocean.Manz25,pcs25,['Manz25','GDL']);
+    case 'PUE':return ddp(f25,F.ocean.Manz25,pcs25,['Manz25','Pue']);   case 'CUAU':return ddp(f25,F.ocean.Manz25,pcs25,['Manz25','Cuau']);
+    case 'CIF_MANZ28':return cif(f28,F.ocean.Manz28,pcs28);case 'DDP_MANZ28':return ddp(f28,F.ocean.Manz28,pcs28,['Manz28']);
+    case 'CUAUF':return ddp(f28,F.ocean.Manz28,pcs28,['Manz28','CuauF']);
+    case 'CIF_PROG':return cif(f28,F.ocean.Prog28,pcs28);  case 'DDP_PROG':return ddp(f28,F.ocean.Prog28,pcs28,['Prog']); case 'MER':return ddp(f28,F.ocean.Prog28,pcs28,['Prog','Mer']);
+    case 'CIF_VERA':return cif(f28,F.ocean.Vera28,pcs28);  case 'DDP_VERA':return ddp(f28,F.ocean.Vera28,pcs28,['Vera']);
+  }
+  return{fob:0,ocean:0,arancel:0,terrestre:0};
 }
 
 /* ===== estado ===== */
@@ -464,6 +499,36 @@ async function nuevaVig(){
   await loadData();curVig[origin]=nid;buildAll();setSaving('vigencia creada ✓');
 }
 
+/* ===== análisis de costos por item (admin) ===== */
+let analProd=null;
+function renderAnalisis(){
+  const v=cur(),b=$('analBody');if(!v){b.innerHTML='';return;}
+  const prods=v.products;
+  const sel=(analProd&&prods.some(p=>p.id===analProd))?analProd:(prods[0]&&prods[0].id);
+  analProd=sel;
+  const p=prods.find(x=>x.id===sel);
+  const marg=+$('marg').value,codes=destListNow();
+  const opts=(O().fams||[]).map(f=>{const items=prods.filter(x=>x.fam===f);if(!items.length)return '';
+    return '<optgroup label="'+f+'">'+items.map(x=>'<option value="'+x.id+'"'+(x.id===sel?' selected':'')+'>'+plabel(x)+'</option>').join('')+'</optgroup>';}).join('');
+  let rows='';
+  if(p)codes.forEach(code=>{
+    const bd=O().engine==='sheet'?bdBR(p,BR_DBYC[code],v):bdAS(p,code,v,contAS);
+    const cifv=bd.fob+bd.ocean,costo=bd.fob+bd.ocean+bd.arancel+bd.terrestre,pv=vtaOf(costo,marg);
+    rows+='<tr><td>'+COL()[code]+'</td><td class="num">'+money(bd.fob)+'</td><td class="num">'+(bd.ocean?money(bd.ocean):'—')+'</td>'+
+      '<td class="num" style="color:var(--muted)">'+money(cifv)+'</td><td class="num">'+(bd.arancel?money(bd.arancel):'—')+'</td>'+
+      '<td class="num">'+(bd.terrestre?money(bd.terrestre):'—')+'</td><td class="num val">'+money(costo)+'</td><td class="num val vta">'+money(pv)+'</td></tr>';
+  });
+  const contTag=O().has_container?(' · '+contAS+' Ton'):'';
+  const volTxt=p?volOf(p.thick).toFixed(4)+' m³/hoja':'';
+  b.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;margin-bottom:16px">'+
+    '<div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Producto</label>'+
+    '<select id="analSel" style="min-width:300px;background:var(--panel-3);border:1px solid var(--border);color:var(--ink);border-radius:8px;padding:9px 11px;font-size:13px">'+opts+'</select></div>'+
+    '<div style="font-size:12px;color:var(--muted);line-height:1.6">Origen <b style="color:var(--ink)">'+O().label+'</b>'+contTag+'<br>Vigencia '+v.label+' · T.C. $'+v.tc.toFixed(4)+' · Margen '+marg+'%'+(volTxt?' · '+volTxt:'')+'</div></div>'+
+    '<div class="tscroll"><table><thead><tr><th>Destino</th><th class="num">FOB</th><th class="num">+ Flete marít.</th><th class="num">= CIF</th><th class="num">+ Arancel</th><th class="num">+ Flete terr.</th><th class="num">= Costo puesto</th><th class="num">P. Venta</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="note">Desglose por pieza (hoja 4′×8′), USD. <b>Costo puesto = FOB + flete marítimo + arancel + flete terrestre.</b> CIF = FOB + flete marítimo (antes de arancel). P. Venta = costo ÷ (1−margen); el margen se toma del control de la pestaña Consultar. Cambia origen / contenedor / margen ahí y este desglose se recalcula.</div>';
+  const s=$('analSel');if(s)s.onchange=e=>{analProd=e.target.value;renderAnalisis();};
+}
+
 /* ===== menús / chrome ===== */
 function grpAsiaCol(c){return c.startsWith('CIF')||c==='FOB'?'Base / CIF':'DDP';}
 function grpBrCol(code){const d=BR_DBYC[code];return d.type==='fob'||d.type==='cif'?'Base / Puerto (FOB · CIF)':d.type==='ddpport'?'DDP en puerto':'DDP en ciudad';}
@@ -479,7 +544,7 @@ function syncOriginUI(){const asia=origin==='asia';
   [...$('originSeg').children].forEach(x=>x.classList.toggle('on',x.dataset.o===origin));
   $('vig').innerHTML=O().vigs.map(v=>'<option value="'+v.id+'"'+(v.id===curVig[origin]?' selected':'')+'>'+v.label+'</option>').join('');
   const c=cur();if(c){$('marg').value=c.margin;$('margV').textContent=c.margin+'%';}}
-function buildAll(){syncOriginUI();renderMatChips();renderMatMenu();renderDestList();syncChips();renderTable();if(!$('secEditar').classList.contains('hidden'))renderEditor();}
+function buildAll(){syncOriginUI();renderMatChips();renderMatMenu();renderDestList();syncChips();renderTable();if(!$('secEditar').classList.contains('hidden'))renderEditor();if(!$('secAnalisis').classList.contains('hidden'))renderAnalisis();}
 
 /* ===== eventos ===== */
 $('originSeg').onclick=e=>{const b=e.target.closest('[data-o]');if(!b)return;origin=b.dataset.o;buildAll();};
@@ -499,10 +564,16 @@ document.addEventListener('click',e=>{if(!e.target.closest('.menu')){$('destPop'
 $('tbl').addEventListener('click',e=>{const b=e.target.closest('.rowcopy');if(b)copyLine(decodeURIComponent(b.dataset.f),b.dataset.t);});
 $('priceSeg').onclick=e=>{const b=e.target.closest('[data-p]');if(!b)return;priceMode=b.dataset.p;[...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));renderTable();};
 $('unitSeg').onclick=e=>{const b=e.target.closest('[data-u]');if(!b)return;unitMode=b.dataset.u;[...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));renderTable();};
-$('marg').oninput=e=>{$('margV').textContent=(+e.target.value)+'%';renderTable();};
+$('marg').oninput=e=>{$('margV').textContent=(+e.target.value)+'%';renderTable();if(!$('secAnalisis').classList.contains('hidden'))renderAnalisis();};
 $('btnImg').onclick=copyImage;$('btnWa').onclick=copyWa;
-$('tabC').onclick=()=>{$('secConsulta').classList.remove('hidden');$('secEditar').classList.add('hidden');$('tabC').classList.add('on');$('tabE').classList.remove('on');renderTable();};
-$('tabE').onclick=()=>{$('secConsulta').classList.add('hidden');$('secEditar').classList.remove('hidden');$('tabE').classList.add('on');$('tabC').classList.remove('on');renderEditor();};
+function setMode(m){
+  $('secConsulta').classList.toggle('hidden',m!=='c');$('secEditar').classList.toggle('hidden',m!=='e');$('secAnalisis').classList.toggle('hidden',m!=='a');
+  $('tabC').classList.toggle('on',m==='c');$('tabE').classList.toggle('on',m==='e');$('tabA').classList.toggle('on',m==='a');
+  if(m==='c')renderTable();else if(m==='e')renderEditor();else renderAnalisis();
+}
+$('tabC').onclick=()=>setMode('c');
+$('tabE').onclick=()=>setMode('e');
+$('tabA').onclick=()=>setMode('a');
 
 /* ===== AUTH ===== */
 function gmsg(t,cls){const el=$('gmsg');el.textContent=t||'';el.className=cls||'';}
