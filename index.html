@@ -573,7 +573,7 @@ let projects=[], tasks=[], entries=[], links=[], mails=[], meetings=[], calConne
 let active=null;         // open cmd_time_entry row (ended_at null) or null
 let lastInteract=Date.now();
 let filter="all";
-let mtPeriod='hoy', centerView='tiempos', juntaAuto=null;
+let mtPeriod='hoy', centerView='tiempos', juntaAuto=null, resumeTarget=null;
 let selProj=null;        // proyecto "abierto" (para gestionar/archivar)
 let newRecur=[], recEditTask=null;
 const DOW=['','L','M','M','J','V','S','D'];                     // ISO 1=lun..7=dom
@@ -676,6 +676,8 @@ function personalOpen(){ return entries.find(e=>!e.ended_at && (e.kind==='descan
 function anyOpen(){ return entries.some(e=>!e.ended_at); }
 function lastPausedTaskId(){ const paused=tasks.filter(t=>t.status==='paused'&&!t.parent_task_id); if(!paused.length)return null;
   let best=null,bt=0; paused.forEach(t=>{ let mx=0; entries.forEach(e=>{ if(e.kind==='task'&&e.task_id===t.id&&e.ended_at){ const x=new Date(e.ended_at).getTime(); if(x>mx)mx=x; } }); if(mx>bt){bt=mx;best=t.id;} }); return best; }
+function focusedTaskId(){ const e=entries.find(x=>!x.ended_at&&x.kind==='task'&&!isPar(x.task_id)); return e?e.task_id:null; }
+async function resumeLastTask(){ const rt=resumeTarget; resumeTarget=null; if(!rt)return false; const t=tasks.find(x=>x.id===rt); if(t&&t.status==='paused'){ await startTask(rt); return true; } return false; }
 function liveDelta(){ return liveOf(active); }
 function projSecToday(p){ let s=closedSecToday(p.id); entries.forEach(e=>{ if(!e.ended_at && e.kind==='task' && e.project_id===p.id) s+=liveOf(e); }); return s; }
 function otrosSecToday(){ return closedOtrosToday()+liveOf(otrosOpen()); }
@@ -701,8 +703,8 @@ function generalOpen(){ return entries.find(e=>!e.ended_at && e.kind==='general'
 function generalSecToday(){ const ts=todayStartISO(); let s=entries.filter(x=>x.ended_at && x.kind==='general' && x.started_at>=ts).reduce((a,x)=>a+(x.seconds||0),0); const g=generalOpen(); if(g)s+=liveOf(g); return s; }
 async function toggleGeneral(){
   const g=generalOpen();
-  if(g){ await endEntry(g); toast("📨 Trabajo general detenido"); const rid=lastPausedTaskId(); if(rid){ await startTask(rid); return; } }
-  else{ await pauseOthers(null); await sb.from('cmd_time_entry').insert({ kind:'general', label:'TRABAJO GENERAL', started_at:nowISO() }); toast("📨 Trabajo general — capturando tiempo (correo, pendientes chicos)"); }
+  if(g){ await endEntry(g); toast("📨 Trabajo general detenido"); if(await resumeLastTask())return; }
+  else{ resumeTarget=focusedTaskId(); await pauseOthers(null); await sb.from('cmd_time_entry').insert({ kind:'general', label:'TRABAJO GENERAL', started_at:nowISO() }); toast("📨 Trabajo general — capturando tiempo (correo, pendientes chicos)"); }
   await refresh(); paintOtros();
 }
 // ===== JUNTAS AUTOMÁTICAS =====
@@ -761,16 +763,16 @@ async function addSubtask(parentId){ const tk=tasks.find(x=>x.id===parentId); if
   toast("＋ Sub-tarea agregada"); await refresh(); }
 async function toggleOtros(){
   const oo=otrosOpen();
-  if(oo){ await endEntry(oo); toast("OTROS detenido"); const rid=lastPausedTaskId(); if(rid){ await startTask(rid); return; } }
-  else { await pauseOthers(null); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
+  if(oo){ await endEntry(oo); toast("OTROS detenido"); if(await resumeLastTask())return; }
+  else { resumeTarget=focusedTaskId(); await pauseOthers(null); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
   await refresh(); paintOtros();
 }
 // Descanso / Lunch = tiempo PERSONAL neutral (no cuenta como trabajo ni OTROS). Al terminar, reanuda la última tarea.
 async function togglePersonal(kind){
   const cur=personalOpen();
   if(cur){ await endEntry(cur);
-    if(cur.kind===kind){ toast((kind==='lunch'?'🍽 Lunch':'☕ Descanso')+' terminado'); const rid=lastPausedTaskId(); if(rid){ await startTask(rid); return; } await refresh(); paintOtros(); return; }
-  } else { await pauseOthers(null); }
+    if(cur.kind===kind){ toast((kind==='lunch'?'🍽 Lunch':'☕ Descanso')+' terminado'); if(await resumeLastTask())return; await refresh(); paintOtros(); return; }
+  } else { resumeTarget=focusedTaskId(); await pauseOthers(null); }
   await sb.from('cmd_time_entry').insert({ kind, label:(kind==='lunch'?'LUNCH':'DESCANSO'), started_at:nowISO() });
   toast(kind==='lunch'?'🍽 En lunch — disfruta':'☕ En descanso — tómate tu tiempo'); await refresh(); paintOtros();
 }
