@@ -125,6 +125,11 @@
   .task.paused .elapsed{color:#cdb26a}
   .parbadge{font-size:10px;font-weight:700;color:#8fb4ff;background:rgba(120,150,220,.14);border:1px solid rgba(120,150,220,.32);padding:1px 7px;border-radius:999px;cursor:pointer}
   .pausebadge{font-size:10px;font-weight:700;color:#cdb26a;background:rgba(205,178,106,.14);border:1px solid rgba(205,178,106,.3);padding:1px 7px;border-radius:999px}
+  .pstates{display:flex;flex-direction:column;gap:6px;justify-content:center;flex:none}
+  .pstate{background:var(--panel-3);border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.15s}
+  .pstate:hover{color:var(--ink);border-color:var(--border-soft)}
+  .pstate.active{background:#26314a;border-color:#5b74b0;color:#cfe0ff}
+  :root.light .pstate.active{background:#dce8ff;border-color:#89a7e0;color:#20386b}
   .task.waiting .title{color:#d8b25e}
   .subcount{font-size:10px;padding:2px 7px;border-radius:999px;background:#16241c;color:var(--good);border:1px solid var(--good-dim);white-space:nowrap}
   .espbadge{font-size:10px;padding:2px 7px;border-radius:999px;background:#2a2110;color:#e0b25b;border:1px solid #5a4620;font-family:var(--mono);white-space:nowrap}
@@ -450,8 +455,12 @@
   <div class="bar">
     <div class="otros" id="otrosBtn" role="button" tabindex="0" aria-pressed="false">
       <div class="obtn" id="oIcon">◉</div>
-      <div class="oinfo"><div class="olbl">Distracción / no planeado</div><div class="otxt" id="oTxt">OTROS</div></div>
+      <div class="oinfo"><div class="olbl">No planeado / interrupción</div><div class="otxt" id="oTxt">OTROS</div></div>
       <div class="otime" id="oTime">00:00:00</div>
+    </div>
+    <div class="pstates">
+      <button class="pstate" id="descBtn" title="Descanso — tiempo personal, sin problema">☕ Descanso</button>
+      <button class="pstate" id="lunchBtn" title="Lunch — tu tiempo de comida">🍽 Lunch</button>
     </div>
     <div class="breakdown">
       <div class="bhead"><span>Tiempo por proyecto · hoy</span><span id="bkTotal"></span></div>
@@ -533,6 +542,7 @@ function nowISO(){return new Date().toISOString();}
 // ---------- state ----------
 let projects=[], tasks=[], entries=[], links=[], mails=[], meetings=[], calConnected=false, nsId=null;
 let active=null;         // open cmd_time_entry row (ended_at null) or null
+let lastInteract=Date.now();
 let filter="all";
 let selProj=null;        // proyecto "abierto" (para gestionar/archivar)
 let newRecur=[], recEditTask=null;
@@ -602,7 +612,8 @@ async function enterApp(session){
   history.replaceState(null,"",location.pathname); // limpia el hash del magic link
   renderClock(); renderNowSelect(); initLayout();
   await refresh();
-  if(!ticking){ ticking=true; setInterval(tick,1000); setInterval(refresh, 60000); }
+  if(!ticking){ ticking=true; setInterval(tick,1000); setInterval(refresh, 60000); setInterval(checkIdlePause,60000);
+    ['click','keydown','pointerdown'].forEach(ev=>document.addEventListener(ev,()=>{lastInteract=Date.now();},{passive:true})); }
 }
 
 // ================= DATA =================
@@ -631,6 +642,10 @@ function openTaskEntry(id){ return entries.find(e=>!e.ended_at && e.kind==='task
 function otrosOpen(){ return entries.find(e=>!e.ended_at && e.kind==='otros') || null; }
 function isPar(id){ return !!(tasks.find(t=>t.id===id)||{}).paralelo; }
 function focusedEntry(){ const oo=otrosOpen(); if(oo)return oo; const n=entries.find(e=>!e.ended_at && e.kind==='task' && !isPar(e.task_id)); if(n)return n; return entries.find(e=>!e.ended_at)||null; }
+function personalOpen(){ return entries.find(e=>!e.ended_at && (e.kind==='descanso'||e.kind==='lunch'))||null; }
+function anyOpen(){ return entries.some(e=>!e.ended_at); }
+function lastPausedTaskId(){ const paused=tasks.filter(t=>t.status==='paused'&&!t.parent_task_id); if(!paused.length)return null;
+  let best=null,bt=0; paused.forEach(t=>{ let mx=0; entries.forEach(e=>{ if(e.kind==='task'&&e.task_id===t.id&&e.ended_at){ const x=new Date(e.ended_at).getTime(); if(x>mx)mx=x; } }); if(mx>bt){bt=mx;best=t.id;} }); return best; }
 function liveDelta(){ return liveOf(active); }
 function projSecToday(p){ let s=closedSecToday(p.id); entries.forEach(e=>{ if(!e.ended_at && e.kind==='task' && e.project_id===p.id) s+=liveOf(e); }); return s; }
 function otrosSecToday(){ return closedOtrosToday()+liveOf(otrosOpen()); }
@@ -690,9 +705,26 @@ async function addSubtask(parentId){ const tk=tasks.find(x=>x.id===parentId); if
   toast("＋ Sub-tarea agregada"); await refresh(); }
 async function toggleOtros(){
   const oo=otrosOpen();
-  if(oo){ await endEntry(oo); toast("OTROS detenido"); }
+  if(oo){ await endEntry(oo); toast("OTROS detenido"); const rid=lastPausedTaskId(); if(rid){ await startTask(rid); return; } }
   else { await pauseOthers(null); await sb.from('cmd_time_entry').insert({ kind:'otros', label:'OTROS', started_at:nowISO() }); toast("◉ OTROS activo"); }
   await refresh(); paintOtros();
+}
+// Descanso / Lunch = tiempo PERSONAL neutral (no cuenta como trabajo ni OTROS). Al terminar, reanuda la última tarea.
+async function togglePersonal(kind){
+  const cur=personalOpen();
+  if(cur){ await endEntry(cur);
+    if(cur.kind===kind){ toast((kind==='lunch'?'🍽 Lunch':'☕ Descanso')+' terminado'); const rid=lastPausedTaskId(); if(rid){ await startTask(rid); return; } await refresh(); paintOtros(); return; }
+  } else { await pauseOthers(null); }
+  await sb.from('cmd_time_entry').insert({ kind, label:(kind==='lunch'?'LUNCH':'DESCANSO'), started_at:nowISO() });
+  toast(kind==='lunch'?'🍽 En lunch — disfruta':'☕ En descanso — tómate tu tiempo'); await refresh(); paintOtros();
+}
+// Auto-pausa por inactividad real (20 min sin clicks/teclas): detiene el cronómetro para no "contar de más" si te alejas.
+async function checkIdlePause(){
+  const running=entries.filter(e=>!e.ended_at&&e.kind==='task'&&!isPar(e.task_id));
+  if(!running.length)return;
+  if(Date.now()-lastInteract < 20*60*1000)return;
+  for(const e of running){ await endEntry(e); await sb.from('cmd_task').update({ status:'paused' }).eq('id',e.task_id); }
+  toast("⏸ Pausé tu cronómetro por inactividad — retómalo cuando sigas"); await refresh(); paintOtros();
 }
 async function addTask(){
   const inp=$("#newTask"); const pid=$("#newProj").value; const title=inp.value.trim(); if(!title)return;
@@ -737,7 +769,7 @@ function iniOf(s){ return (s||'?').replace(/[<>]/g,'').split(/\s+/).map(x=>x[0]|
 function localDate(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtDue(d){ if(!d)return ''; const p=d.split('-'); return p[2]+' '+['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][(+p[1])-1]; }
 function isOverdue(t){ return t.due_date && t.due_date < localDate() && !isDoneNow(t); }
-function taskRank(t){ return isDoneNow(t)?3:(t.status==='running'?0:(t.status==='paused'?0.5:((t.espera_desde&&t.status!=='done')?1.5:1))); }
+function taskRank(t){ return isDoneNow(t)?1:0; }   // solo completadas al final; el resto conserva su posición (según sortMode), solo cambia de color
 function prioRank(t){ const r={A:0,B:1,C:2}[t.priority_abc]; return r==null?3:r; }
 function sortTasks(arr){
   if(sortMode==='tiempo') return arr.sort((a,b)=>taskRank(a)-taskRank(b) || taskSec(b)-taskSec(a));
@@ -905,10 +937,12 @@ function renderTopStats(){
 }
 function renderNow(){
   const pill=$("#nowpill"),txt=$("#nowTxt"),tt=$("#nowT"); pill.className="nowpill";
-  if(active && active.kind==='task'){ const tk=tasks.find(x=>x.id===active.task_id); pill.classList.add("run");
+  const pers=personalOpen();
+  if(pers){ txt.textContent=(pers.kind==='lunch'?'En lunch':'En descanso'); tt.textContent=fmt(liveOf(pers)); }
+  else if(active && active.kind==='task'){ const tk=tasks.find(x=>x.id===active.task_id); pill.classList.add("run");
     txt.textContent=tk?tk.title:active.label; tt.textContent=fmt(taskSec({id:active.task_id})); }
   else if(active && active.kind==='otros'){ pill.classList.add("otros"); txt.textContent="OTROS (no planeado)"; tt.textContent=fmt(otrosSecToday()); }
-  else { txt.textContent="Sin actividad"; tt.textContent="00:00:00"; }
+  else { txt.textContent="Sin cronómetro activo"; tt.textContent="00:00:00"; }
 }
 function refreshLive(){
   entries.forEach(e=>{ if(!e.ended_at && e.kind==='task'){ const el=document.querySelector('.task[data-id="'+e.task_id+'"] .elapsed'); if(el){const tk=tasks.find(x=>x.id===e.task_id); if(tk)el.textContent=fmt(taskSec(tk));} } });
@@ -1148,7 +1182,10 @@ function renderNowSelect(){
 }
 function paintOtros(){const on=!!otrosOpen();const ob=$("#otrosBtn");
   ob.classList.toggle("active",on);ob.setAttribute("aria-pressed",on?"true":"false");
-  $("#oTxt").textContent=on?"EN OTROS…":"OTROS"; $("#oIcon").textContent=on?"■":"◉";}
+  $("#oTxt").textContent=on?"EN OTROS…":"OTROS"; $("#oIcon").textContent=on?"■":"◉";
+  const pers=personalOpen();const db=$("#descBtn"),lb=$("#lunchBtn");
+  if(db)db.classList.toggle("active",!!pers&&pers.kind==='descanso');
+  if(lb)lb.classList.toggle("active",!!pers&&pers.kind==='lunch');}
 function renderAll(){ renderNowSelect(); renderTasks(); renderProjects(); renderFilters(); renderMail(); renderNS(); renderAgenda(); renderTopStats(); renderNow(); renderBars(); renderDayTotal(); renderWeek(); paintOtros(); }
 
 // ---------- listeners ----------
@@ -1230,9 +1267,11 @@ async function openPip(){
 function updatePip(){
   if(!pipWin) return; const d=pipWin.document; const card=d.getElementById('pipCard'); if(!card) return;
   d.documentElement.className=document.documentElement.className;
-  const fid=(active&&active.kind==='task')?active.task_id:null;
+  const pers=personalOpen();
+  const fid=(!pers&&active&&active.kind==='task')?active.task_id:null;
   let name='Sin actividad', time='00:00:00', mode='idle';
-  if(fid){ const tk=tasks.find(x=>x.id===fid); name=tk?tk.title:(active.label||'Tarea'); time=fmt(taskSec({id:fid})); mode='run'; }
+  if(pers){ name=(pers.kind==='lunch'?'🍽 En lunch':'☕ En descanso'); time=fmt(liveOf(pers)); mode='idle'; }
+  else if(fid){ const tk=tasks.find(x=>x.id===fid); name=tk?tk.title:(active.label||'Tarea'); time=fmt(taskSec({id:fid})); mode='run'; }
   else if(active&&active.kind==='otros'){ name='OTROS · interrupción'; time=fmt(otrosSecToday()); mode='otros'; }
   d.getElementById('pipName').textContent=name;
   d.getElementById('pipTimer').textContent=time;
@@ -1267,6 +1306,8 @@ $("#nsModal").addEventListener("click",e=>{ if(e.target.id==='nsModal')$("#nsMod
 $("#newProj").addEventListener("change", e=>{ if(e.target.value==='__new__') newCategory(null); });
 const ob=$("#otrosBtn");
 ob.addEventListener("click",toggleOtros);
+$("#descBtn")&&$("#descBtn").addEventListener("click",()=>togglePersonal('descanso'));
+$("#lunchBtn")&&$("#lunchBtn").addEventListener("click",()=>togglePersonal('lunch'));
 ob.addEventListener("keydown",e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleOtros();}});
 const THEME_KEY='cmd_theme';
 function applyTheme(t){ document.documentElement.classList.toggle('light', t==='light'); const b=$("#themeBtn"); if(b)b.textContent=(t==='light'?'🌙':'☀'); }
