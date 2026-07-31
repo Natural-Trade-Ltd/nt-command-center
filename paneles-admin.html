@@ -454,8 +454,9 @@ async function copyWa(){if(viewModel(true).ndest===0){toast('Elige al menos un d
 function dutyAllCtl(){return '<span style="margin-left:auto;display:inline-flex;gap:6px;align-items:center;font-weight:400;text-transform:none"><input id="dutyAll" type="number" step="0.1" placeholder="%" style="width:64px;background:var(--panel-3);border:1px solid var(--border);color:var(--ink);border-radius:6px;padding:4px 6px;font-family:var(--mono);font-size:12px;text-align:right"><button class="filldown" id="dutyFillAll">⤓ Aplicar a todos</button></span>';}
 function renderEditor(){
   const v=cur(),b=$('editBody');
-  if(isDDP()){ renderEditorDDP(v,b); return; }
-  if(O().engine==='sheet'){
+  /* sin return: la rama ddp también necesita el cableado común de abajo (piezas, casillas, margen) */
+  if(isDDP())renderEditorDDP(v,b);
+  else if(O().engine==='sheet'){
     let fob='';BR_FAMS.forEach(g=>{fob+='<div class="egrp">'+g+'</div>';
       v.products.filter(p=>p.fam===g).forEach(p=>{fob+='<div class="prow"><div class="plab"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Visible en la lista publicada"><input type="checkbox" data-pactive="'+p.id+'"'+(p.active!==false?' checked':'')+' style="accent-color:var(--accent);width:15px;height:15px">'+plabel(p)+'</label></div><div class="pins">'+
         '<div class="pin"><span>FOB $/m³</span><input type="number" step="1" data-pid="'+p.id+'" data-fld="fob" value="'+p.fob+'"></div>'+
@@ -584,8 +585,8 @@ function renderEditorDDP(v,b){
         '<div class="ecard"><div class="kk">Etiqueta de la vigencia</div><input id="upLabel" type="text" value="'+hoyLabel()+'"></div>'+
         '<div class="ecard"><div class="kk">Margen por defecto %</div><input id="upMarg" type="number" step="0.5" value="'+v.margin+'"></div>'+
       '</div>'+
-      '<div id="upPrev" class="note">Elige el archivo: leo la hoja <b>costos</b>, detecto las columnas de los 7 destinos DDP por su encabezado y te muestro una vista previa antes de publicar. Nada se guarda hasta que confirmes.</div>'+
-      '<div class="acts"><button class="btn" id="upGo" disabled>✓ Confirmar y publicar vigencia</button><button class="btn ghost" id="upCancel">Cancelar</button></div>'+
+      '<div id="upPrev" class="note">'+UP_HINT+'</div>'+
+      '<div class="acts"><button class="btn" id="upGo" disabled style="opacity:.35;cursor:not-allowed">✓ Confirmar y publicar vigencia</button><button class="btn ghost" id="upCancel">Cancelar</button></div>'+
     '</div>'+
     '<div class="esec"><h3>Costos cargados <span class="hint">· DDP en USD/pza (solo lectura: vienen del Excel) · casilla = visible en la lista · piezas por contenedor editables</span></h3>'+list+'</div>';
 }
@@ -613,6 +614,7 @@ function renderAnalisisDDP(v,b,p,prods,sel,marg,codes){
 }
 
 /* ===== módulo de carga: Excel de Gerardo → preview → RPC pnl_upload_ddp ===== */
+const UP_HINT='Elige el archivo: leo la hoja <b>costos</b>, detecto las columnas de los 7 destinos DDP por su encabezado y aquí mismo te muestro la vista previa. Nada se guarda hasta que confirmes, y el botón de publicar sigue apagado hasta que la vista previa esté lista.';
 const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 function hoyLabel(){const d=new Date();return String(d.getDate()).padStart(2,'0')+'-'+MESES[d.getMonth()]+' '+d.getFullYear();}
 const nrm=s=>String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
@@ -686,10 +688,14 @@ function compararConActual(nuevos){
   act.forEach((q,k)=>{if(!vistos.has(k))faltan.push(q.fam+' '+q.thick+'mm');});
   return {iguales,cambian,nuevas,faltan};
 }
+/* el botón deshabilitado se tiene que VER deshabilitado, si no parece que ya se puede publicar */
+function goEnable(on,why){const go=$('upGo');if(!go)return;
+  go.disabled=!on;go.style.opacity=on?'1':'.35';go.style.cursor=on?'pointer':'not-allowed';
+  go.title=on?'Crea la vigencia nueva con lo que muestra la vista previa':(why||'Primero elige el archivo');}
 function pintarPreview(){
   const el=$('upPrev'),go=$('upGo');
-  if(!upParsed){el.className='note';el.innerHTML='Elige el archivo para ver la vista previa.';go.disabled=true;return;}
-  if(upParsed.error){el.className='note';el.innerHTML='<b style="color:var(--bad,#e06c6c)">No pude leer el archivo:</b> '+upParsed.error;go.disabled=true;return;}
+  if(!upParsed){el.className='note';el.innerHTML=UP_HINT;goEnable(false);return;}
+  if(upParsed.error){el.className='note';el.innerHTML='<b style="color:var(--bad,#e06c6c)">No pude leer el archivo:</b> '+upParsed.error;goEnable(false,'No pude leer el archivo');return;}
   const {rows,map,ign,warns,cmp,checksum,fams,hoja}=upParsed;
   const muestra=rows.slice(0,6).map(p=>'<tr><td>'+p.fam+'</td><td class="num">'+p.thick+'</td>'+
     DDP_CODES.map(c=>'<td class="num">'+(p.ddp[c]==null?'—':money(p.ddp[c]))+'</td>').join('')+
@@ -706,7 +712,7 @@ function pintarPreview(){
     (warns.length?('<div class="note" style="margin:0 0 10px">⚠ '+warns.slice(0,5).join(' · ')+(warns.length>5?(' · +'+(warns.length-5)+' más'):'')+'</div>'):'')+
     '<div class="tscroll"><table><thead><tr><th>Familia</th><th class="num">mm</th>'+DDP_CODES.map(c=>'<th class="num">'+DDP_COL[c].replace('DDP ','')+'</th>').join('')+'<th class="num">pz 25T</th><th class="num">pz 28T</th></tr></thead><tbody>'+muestra+'</tbody></table></div>'+
     '<div class="note">Muestra de los primeros 6 renglones. Al confirmar se crea la vigencia «'+$('upLabel').value+'» y pasa a ser la vigente; la actual queda en el historial.</div>';
-  go.disabled=rows.length===0;
+  goEnable(rows.length>0,'El archivo no trajo ningún producto');
 }
 async function leerExcel(file){
   upParsed=null;pintarPreview();
@@ -744,6 +750,7 @@ function wireUploader(){
   const go=$('upGo');if(go)go.onclick=publicarDDP;
   const cx=$('upCancel');if(cx)cx.onclick=()=>{upParsed=null;if($('upFile'))$('upFile').value='';pintarPreview();};
   const lb=$('upLabel');if(lb)lb.oninput=()=>{if(upParsed&&!upParsed.error)pintarPreview();};
+  pintarPreview();   /* deja el botón y el aviso en el estado que corresponde al repintar */
 }
 
 /* ===== menús / chrome ===== */
