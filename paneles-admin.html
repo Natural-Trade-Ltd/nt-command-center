@@ -242,6 +242,15 @@ const AS_COL={FOB:'FOB',CIF_ENS:'CIF Ensenada',DDP_ENS:'DDP Ensenada',CIF_MANZ25
 const AS_DEST={'25':['FOB','CIF_ENS','DDP_ENS','CIF_MANZ25','DDP_MANZ25','MONT','GDL','PUE','CUAU'],'28':['FOB','CIF_MANZ28','DDP_MANZ28','CUAUF','CIF_PROG','DDP_PROG','MER','CIF_VERA','DDP_VERA']};
 const META={brasil:{col:BR_COL,fams:BR_FAMS},asia:{col:AS_COL,fams:null}};
 
+/* ===== China = DDP DIRECTO (31-jul): Gerardo entrega el costo puesto final por destino.
+   No hay FOB/fletes/arancel/T.C. que derivar: el Excel ya trae el DDP en USD por pieza. ===== */
+const DDP_CODES=['ENS','MANZ','PROG','MONT','GDL','PUE','CUAU'];
+const DDP_COL={ENS:'DDP Ensenada',MANZ:'DDP Manzanillo',PROG:'DDP Progreso',MONT:'DDP Monterrey',GDL:'DDP Guadalajara',PUE:'DDP Puebla',CUAU:'DDP Cd. Cuauhtémoc'};
+/* Gerardo abrevia los encabezados ("DDP Ens.", "DDP Mont. (Full)"), por eso van los prefijos cortos */
+const DDP_SYN={ENS:['ensenada','ens'],MANZ:['manzanillo','manz'],PROG:['progreso','prog'],MONT:['monterrey','mont','mty'],GDL:['guadalajara','gdl'],PUE:['puebla','pue'],CUAU:['cuauhtemoc','cuauh','cuau']};
+const DDP_FIJO={ENS:5,MANZ:6,PROG:7,MONT:8,GDL:9,PUE:10,CUAU:11}; /* F..L del Excel de Gerardo */
+const isDDP=()=>O().engine==='ddp';
+
 /* ===== motores ===== */
 function costBR(p,d,v){
   const duty=p.duty||0, vol=volOf(p.thick), sheets=v.pkgs*p.sheets, fobSheet=p.fob*vol;
@@ -307,14 +316,15 @@ function bdAS(p,code,v,cont){
 /* ===== estado ===== */
 let ORIG={};
 let origin='brasil', priceMode='venta', unitMode='pza', contAS='25';
-let curVig={}, selMats={brasil:new Set(),asia:new Set()}, selDest={brasil:new Set(['DDP_ALT','MTY','GDL']),asia:new Set(['DDP_MANZ25','MONT','GDL'])};
+let curVig={}, selMats={brasil:new Set(),asia:new Set()}, selDest={brasil:new Set(['DDP_ALT','MTY','GDL']),asia:new Set(['MANZ','MONT','GDL'])};
 let loaded=false;
 const O=()=>ORIG[origin];
 const cur=()=>O().vigs.find(v=>v.id===curVig[origin]);
 const prev=()=>{const v=cur();return v&&v.prev?O().vigs.find(x=>x.id===v.prev):null;};
-const COL=()=>O().col;
+const COL=()=>isDDP()?DDP_COL:O().col;
 const destCodesNow=()=>selDest[origin];
-const destListNow=()=>origin==='asia'?AS_DEST[contAS]:BR_DEST.map(d=>d.code);
+const destListNow=()=>isDDP()?DDP_CODES:(origin==='asia'?AS_DEST[contAS]:BR_DEST.map(d=>d.code));
+const contTagNow=()=>(O().has_container&&!isDDP())?(' · '+contAS+' Ton'):'';
 
 /* ===== helpers ===== */
 const vtaOf=(c,m)=>c/(1-m/100);
@@ -322,11 +332,25 @@ const money=n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFrac
 const money0=n=>'$'+n.toLocaleString('en-US',{maximumFractionDigits:0});
 const plabel=p=>p.kind==='br'?(p.thick+'mm - '+p.ply+'Ply'):(p.thick+' mm');
 const fmtVig=iso=>{try{return new Date(iso).toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric',timeZone:'America/Mexico_City'});}catch(e){return iso||'';}};
-function unitCost(p,dcode){const v=cur();return O().engine==='sheet'?costBR(p,BR_DBYC[dcode],v):costAS(p,dcode,v,contAS);}
-function varPct(p){const pv=prev();if(!pv)return null;const pp=pv.products.find(x=>x.fam===p.fam&&x.thick===p.thick);if(!pp||pp.fob==null)return null;return p.fob/pp.fob-1;}
-function fmtCell(p,dcode,showVta,marg,unit){let c=unitCost(p,dcode);let val=showVta?vtaOf(c,marg):c;if(unit==='m3')val=val/volOf(p.thick);return unit==='m3'?money0(val):money(val);}
+function unitCost(p,dcode){const v=cur();const e=O().engine;
+  if(e==='sheet')return costBR(p,BR_DBYC[dcode],v);
+  if(e==='ddp'){const x=p.ddp?p.ddp[dcode]:null;return (x==null||!isFinite(+x))?null:+x;}
+  return costAS(p,dcode,v,contAS);}
+/* ¿la línea trae costo? (ddp: al menos un destino; brasil: FOB; china viejo: FOB 25T) */
+function hasCost(p){if(p.kind==='ddp')return p.ddp&&Object.keys(p.ddp).length>0;
+  if(p.kind==='br')return p.fob!=null&&isFinite(+p.fob);
+  return p.fob25!=null&&isFinite(+p.fob25);}
+/* Variación vs vigencia anterior: brasil por FOB; ddp por el DDP del destino de referencia */
+function varPct(p,refCode){const pv=prev();if(!pv)return null;
+  const pp=pv.products.find(x=>x.fam===p.fam&&x.thick===p.thick);if(!pp)return null;
+  if(p.kind==='ddp'){const c=refCode||DDP_CODES[0];const a=p.ddp&&p.ddp[c],b=pp.ddp&&pp.ddp[c];
+    if(a==null||b==null||!isFinite(+a)||!isFinite(+b)||+b===0)return null;return +a/+b-1;}
+  if(pp.fob==null||p.fob==null)return null;return p.fob/pp.fob-1;}
+function fmtCell(p,dcode,showVta,marg,unit){let c=unitCost(p,dcode);
+  if(c==null||!isFinite(c))return '—';
+  let val=showVta?vtaOf(c,marg):c;if(unit==='m3')val=val/volOf(p.thick);return unit==='m3'?money0(val):money(val);}
 function dutyUniform(v){const vals=[...new Set((v.products||[]).map(p=>p.duty))];return vals.length===1?vals[0]:null;}
-function dutyStr(v){const u=dutyUniform(v);return u==null?'varía':(u*100).toFixed(1)+'%';}
+function dutyStr(v){if(isDDP())return 'incluido en DDP';const u=dutyUniform(v);return u==null?'varía':(u*100).toFixed(1)+'%';}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('on'),1900);}
 
 /* ===== guardado ===== */
@@ -350,6 +374,7 @@ async function loadData(){
   V.data.forEach(v=>{const o={id:v.id,list:v.list_id,label:v.label,tc:+v.tc,pkgs:v.pkgs==null?null:+v.pkgs,margin:+v.margin,dutyByFam:v.duty_by_fam||{},freight:v.freight||{},prev:v.prev_id,is_current:v.is_current,updated_at:v.updated_at,products:[]};byId[v.id]=o;if(ORIG[v.list_id])ORIG[v.list_id].vigs.push(o);});
   P.data.forEach(p=>{const o=byId[p.vigencia_id];if(!o)return;
     if(ORIG[o.list].engine==='sheet')o.products.push({kind:'br',id:p.id,fam:p.fam,thick:+p.thick,ply:p.ply,sheets:p.sheets,fob:p.fob==null?null:+p.fob,duty:p.duty==null?0:+p.duty,active:p.active!==false});
+    else if(ORIG[o.list].engine==='ddp')o.products.push({kind:'ddp',id:p.id,fam:p.fam,thick:+p.thick,ddp:p.ddp||{},pcs25:p.pcs25,pcs28:p.pcs28,duty:0,active:p.active!==false});
     else o.products.push({kind:'as',id:p.id,fam:p.fam,thick:+p.thick,fob25:+p.fob25,fob28:+p.fob28,pcs25:p.pcs25,pcs28:p.pcs28,duty:p.duty==null?0:+p.duty,active:p.active!==false});});
   Object.keys(ORIG).forEach(k=>{const vs=ORIG[k].vigs;const c=vs.find(x=>x.is_current)||vs[0];if(c)curVig[k]=c.id;
     if(!ORIG[k].fams){ORIG[k].fams=[...new Set(vs.flatMap(v=>v.products.map(p=>p.fam)))];}});
@@ -363,7 +388,7 @@ async function loadData(){
 function selDests(){return destListNow().filter(c=>destCodesNow().has(c)).map(c=>({code:c}));}
 function viewModel(forExport,only){
   const v=cur(),marg=+$('marg').value,showVta=priceMode==='venta',unit=unitMode;
-  let prods=v.products.filter(p=>selMats[origin].has(p.fam)&&p.fob!==null&&p.fob!==undefined);
+  let prods=v.products.filter(p=>selMats[origin].has(p.fam)&&hasCost(p));
   if(only)prods=v.products.filter(p=>p.fam===only.fam&&p.thick===only.thick);
   const codes=destListNow().filter(c=>destCodesNow().has(c));
   const showVar=!forExport&&!!prev();
@@ -372,12 +397,12 @@ function viewModel(forExport,only){
   const groups=[];
   O().fams.forEach(fam=>{const rs=prods.filter(p=>p.fam===fam);if(!rs.length)return;
     groups.push({fam,rows:rs.map(p=>{const cells=codes.map(c=>fmtCell(p,c,showVta,marg,unit));let varc='fl';
-      if(showVar){const vp=varPct(p);cells.push(vp==null?'—':(vp>=0?'+':'')+(vp*100).toFixed(1)+'%');varc=vp==null?'fl':(vp>0?'up':vp<0?'dn':'fl');}
+      if(showVar){const vp=varPct(p,codes[0]);cells.push(vp==null?'—':(vp>=0?'+':'')+(vp*100).toFixed(1)+'%');varc=vp==null?'fl':(vp>0?'up':vp<0?'dn':'fl');}
       return {fam:p.fam,thick:p.thick,label:plabel(p),cells,varc,active:p.active};})});});
   let title;if(only&&groups[0])title=only.fam+' · '+plabel(groups[0].rows[0]);
   else title=codes.length===0?'—':codes.length===1?COL()[codes[0]]:codes.length+' destinos';
-  const contTag=O().has_container?(' · '+contAS+' Ton'):'';
-  return {title,cols,aligns,groups,codes,marg,showVta,unit,vig:v,ndest:codes.length,contTag,showVar};
+  const contTag=contTagNow();
+  return {title,cols,aligns,groups,codes,marg,showVta,unit,vig:v,ndest:codes.length,contTag,showVar,refCode:codes[0]};
 }
 function renderTable(){
   const vm=viewModel(false),t=$('tbl'),span=vm.cols.length+1;
@@ -386,7 +411,9 @@ function renderTable(){
     gr.rows.forEach(r=>{h+='<tr'+(r.active===false?' style="opacity:.4"':'')+'><td>'+r.label+(r.active===false?' <span style="font-size:9px;color:var(--faint)">oculto</span>':'')+'</td>'+r.cells.map((cell,i)=>{const isVar=vm.showVar&&i===r.cells.length-1;
       return '<td class="'+(isVar?('num var '+r.varc):('num val'+(vm.showVta?' vta':'')))+'">'+cell+'</td>';}).join('')+'<td class="cpc"><button class="rowcopy" title="Copiar esta oferta" data-f="'+encodeURIComponent(r.fam)+'" data-t="'+r.thick+'">⧉</button></td></tr>';});});
   h+='</tbody>';t.innerHTML=h;
-  $('unit').textContent='Precios por '+(vm.unit==='m3'?'m³':'pieza (hoja 4′×8′)')+'. '+(vm.showVta?('Precio de venta, margen '+vm.marg+'% (solo pantalla). '):'Costo puesto. ')+(vm.showVar?'Variación = FOB vs vigencia anterior. ':'')+'Vigencia '+fmtVig(vm.vig.updated_at)+' · T.C. $'+vm.vig.tc.toFixed(4)+' · Arancel '+dutyStr(vm.vig)+vm.contTag+'.';
+  const varTxt=vm.showVar?('Variación = '+(isDDP()?((COL()[vm.refCode]||'DDP')+' vs vigencia anterior. '):'FOB vs vigencia anterior. ')):'';
+  const tcTxt=isDDP()?'':(' · T.C. $'+vm.vig.tc.toFixed(4));
+  $('unit').textContent='Precios por '+(vm.unit==='m3'?'m³':'pieza (hoja 4′×8′)')+'. '+(vm.showVta?('Precio de venta, margen '+vm.marg+'% (solo pantalla). '):'Costo puesto. ')+varTxt+'Vigencia '+fmtVig(vm.vig.updated_at)+tcTxt+' · Arancel '+dutyStr(vm.vig)+vm.contTag+'.';
 }
 function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
 function drawImage(only){
@@ -401,7 +428,7 @@ function drawImage(only){
   x.fillStyle=C;x.fillRect(0,0,W,H);x.textBaseline='middle';
   x.fillStyle=ACC;x.font='800 12px '+css('--ui');x.textAlign='left';x.fillText('TABLEROS · '+O().label.toUpperCase(),pad,26);
   x.fillStyle=INK;x.font='800 20px '+css('--ui');x.fillText(vm.title,pad,50);
-  x.fillStyle=MUT;x.font='500 12px '+css('--ui');x.fillText('Vigencia '+fmtVig(vm.vig.updated_at)+'  ·  T.C. $'+vm.vig.tc.toFixed(4)+vm.contTag+'  ·  USD / '+(vm.unit==='m3'?'m³':'pieza'),pad,70);
+  x.fillStyle=MUT;x.font='500 12px '+css('--ui');x.fillText('Vigencia '+fmtVig(vm.vig.updated_at)+(isDDP()?'':('  ·  T.C. $'+vm.vig.tc.toFixed(4)))+vm.contTag+'  ·  USD / '+(vm.unit==='m3'?'m³':'pieza'),pad,70);
   let y=titleH;x.fillStyle=ACD;x.fillRect(pad,y,W-pad*2,headH);let cx=pad;x.font=fH;x.fillStyle=INK;
   vm.cols.forEach((c,i)=>{x.textAlign=vm.aligns[i]==='r'?'right':'left';x.fillText(c.toUpperCase(),vm.aligns[i]==='r'?cx+colW[i]-11:cx+11,y+headH/2);cx+=colW[i];});
   y+=headH;
@@ -427,6 +454,7 @@ async function copyWa(){if(viewModel(true).ndest===0){toast('Elige al menos un d
 function dutyAllCtl(){return '<span style="margin-left:auto;display:inline-flex;gap:6px;align-items:center;font-weight:400;text-transform:none"><input id="dutyAll" type="number" step="0.1" placeholder="%" style="width:64px;background:var(--panel-3);border:1px solid var(--border);color:var(--ink);border-radius:6px;padding:4px 6px;font-family:var(--mono);font-size:12px;text-align:right"><button class="filldown" id="dutyFillAll">⤓ Aplicar a todos</button></span>';}
 function renderEditor(){
   const v=cur(),b=$('editBody');
+  if(isDDP()){ renderEditorDDP(v,b); return; }
   if(O().engine==='sheet'){
     let fob='';BR_FAMS.forEach(g=>{fob+='<div class="egrp">'+g+'</div>';
       v.products.filter(p=>p.fam===g).forEach(p=>{fob+='<div class="prow"><div class="plab"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Visible en la lista publicada"><input type="checkbox" data-pactive="'+p.id+'"'+(p.active!==false?' checked':'')+' style="accent-color:var(--accent);width:15px;height:15px">'+plabel(p)+'</label></div><div class="pins">'+
@@ -488,6 +516,7 @@ function renderEditor(){
   if(pk)pk.oninput=()=>{const v=cur();v.pkgs=+pk.value||1;debounce('pk'+v.id,()=>saveVig(v,{pkgs:v.pkgs}));};
   if(mg)mg.oninput=()=>{const v=cur();v.margin=+mg.value||0;$('marg').value=v.margin;$('margV').textContent=v.margin+'%';renderTable();if(!$('secAnalisis').classList.contains('hidden'))renderAnalisis();debounce('mg'+v.id,()=>saveVig(v,{margin:v.margin}));};
   const nw=$('btnNew');if(nw)nw.onclick=nuevaVig;
+  if(isDDP())wireUploader();
 }
 async function nuevaVig(){
   const v=cur();setSaving('Creando…');
@@ -497,7 +526,9 @@ async function nuevaVig(){
   const nid=ins.data.id;
   const rows=v.products.map((p,i)=>O().engine==='sheet'
     ?{vigencia_id:nid,fam:p.fam,thick:p.thick,ply:p.ply,sheets:p.sheets,fob:p.fob,sort:i}
-    :{vigencia_id:nid,fam:p.fam,thick:p.thick,fob25:p.fob25,fob28:p.fob28,pcs25:p.pcs25,pcs28:p.pcs28,sort:i});
+    :isDDP()
+      ?{vigencia_id:nid,fam:p.fam,thick:p.thick,ddp:p.ddp,pcs25:p.pcs25,pcs28:p.pcs28,sort:i}
+      :{vigencia_id:nid,fam:p.fam,thick:p.thick,fob25:p.fob25,fob28:p.fob28,pcs25:p.pcs25,pcs28:p.pcs28,sort:i});
   await sb.from('pnl_product').insert(rows);
   await loadData();curVig[origin]=nid;buildAll();setSaving('vigencia creada ✓');
 }
@@ -511,6 +542,7 @@ function renderAnalisis(){
   analProd=sel;
   const p=prods.find(x=>x.id===sel);
   const marg=+$('marg').value,codes=destListNow();
+  if(isDDP()){ renderAnalisisDDP(v,b,p,prods,sel,marg,codes); return; }
   const opts=(O().fams||[]).map(f=>{const items=prods.filter(x=>x.fam===f);if(!items.length)return '';
     return '<optgroup label="'+f+'">'+items.map(x=>'<option value="'+x.id+'"'+(x.id===sel?' selected':'')+'>'+plabel(x)+'</option>').join('')+'</optgroup>';}).join('');
   let rows='';
@@ -532,6 +564,188 @@ function renderAnalisis(){
   const s=$('analSel');if(s)s.onchange=e=>{analProd=e.target.value;renderAnalisis();};
 }
 
+/* ===== China (ddp): editor = uploader de Excel + lista de lo cargado ===== */
+function renderEditorDDP(v,b){
+  let list='';
+  (O().fams||[]).forEach(g=>{const items=v.products.filter(p=>p.fam===g);if(!items.length)return;
+    list+='<div class="egrp">'+g+'</div>';
+    items.forEach(p=>{
+      const cells=DDP_CODES.map(c=>{const x=p.ddp?p.ddp[c]:null;
+        return '<div class="pin ro"><span>'+DDP_COL[c].replace('DDP ','')+'</span><div class="rov">'+((x==null||!isFinite(+x))?'—':money(+x))+'</div></div>';}).join('');
+      list+='<div class="prow"><div class="plab"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Visible en la lista publicada"><input type="checkbox" data-pactive="'+p.id+'"'+(p.active!==false?' checked':'')+' style="accent-color:var(--accent);width:15px;height:15px">'+plabel(p)+'</label><small>vol '+volOf(p.thick).toFixed(4)+' m³/pza</small></div><div class="pins">'+cells+
+        '<div class="pin"><span>Pz/cont 25T</span><input type="number" step="1" data-pid="'+p.id+'" data-fld="pcs25" value="'+(p.pcs25==null?'':p.pcs25)+'"></div>'+
+        '<div class="pin"><span>Pz/cont 28T</span><input type="number" step="1" data-pid="'+p.id+'" data-fld="pcs28" value="'+(p.pcs28==null?'':p.pcs28)+'"></div></div></div>';});});
+  b.innerHTML='<div class="egrid">'+
+    '<div class="ecard"><div class="kk">Margen por defecto %</div><input id="eMarg" type="number" step="0.5" value="'+v.margin+'"></div>'+
+    '<div class="ecard"><div class="kk">Vigencia cargada</div><input value="'+v.label+'" disabled style="opacity:.7"></div></div>'+
+    '<div class="esec"><h3>⬆ Actualizar China desde Excel <span class="hint">· archivo de Gerardo «Costos Tableros China» · cada carga crea una vigencia nueva y la anterior queda en el historial</span></h3>'+
+      '<div class="egrid" style="align-items:end">'+
+        '<div class="ecard"><div class="kk">Archivo .xlsx</div><input id="upFile" type="file" accept=".xlsx,.xlsm,.xls" style="padding:7px"></div>'+
+        '<div class="ecard"><div class="kk">Etiqueta de la vigencia</div><input id="upLabel" type="text" value="'+hoyLabel()+'"></div>'+
+        '<div class="ecard"><div class="kk">Margen por defecto %</div><input id="upMarg" type="number" step="0.5" value="'+v.margin+'"></div>'+
+      '</div>'+
+      '<div id="upPrev" class="note">Elige el archivo: leo la hoja <b>costos</b>, detecto las columnas de los 7 destinos DDP por su encabezado y te muestro una vista previa antes de publicar. Nada se guarda hasta que confirmes.</div>'+
+      '<div class="acts"><button class="btn" id="upGo" disabled>✓ Confirmar y publicar vigencia</button><button class="btn ghost" id="upCancel">Cancelar</button></div>'+
+    '</div>'+
+    '<div class="esec"><h3>Costos cargados <span class="hint">· DDP en USD/pza (solo lectura: vienen del Excel) · casilla = visible en la lista · piezas por contenedor editables</span></h3>'+list+'</div>';
+}
+function renderAnalisisDDP(v,b,p,prods,sel,marg,codes){
+  const opts=(O().fams||[]).map(f=>{const items=prods.filter(x=>x.fam===f);if(!items.length)return '';
+    return '<optgroup label="'+f+'">'+items.map(x=>'<option value="'+x.id+'"'+(x.id===sel?' selected':'')+'>'+plabel(x)+'</option>').join('')+'</optgroup>';}).join('');
+  const pv=prev();
+  let rows='';
+  if(p)codes.forEach(c=>{const costo=unitCost(p,c);
+    const ant=pv?(()=>{const q=pv.products.find(x=>x.fam===p.fam&&x.thick===p.thick);const y=q&&q.ddp?q.ddp[c]:null;return (y==null||!isFinite(+y))?null:+y;})():null;
+    const dif=(costo!=null&&ant!=null&&ant!==0)?(costo/ant-1):null;
+    rows+='<tr><td>'+(DDP_COL[c]||c)+'</td>'+
+      '<td class="num val">'+(costo==null?'—':money(costo))+'</td>'+
+      '<td class="num" style="color:var(--muted)">'+(ant==null?'—':money(ant))+'</td>'+
+      '<td class="num var '+(dif==null?'fl':dif>0?'up':dif<0?'dn':'fl')+'">'+(dif==null?'—':((dif>=0?'+':'')+(dif*100).toFixed(1)+'%'))+'</td>'+
+      '<td class="num val vta">'+(costo==null?'—':money(vtaOf(costo,marg)))+'</td>'+
+      '<td class="num" style="color:var(--muted)">'+(costo==null?'—':money0(vtaOf(costo,marg)/volOf(p.thick)))+'</td></tr>';});
+  b.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;margin-bottom:16px">'+
+    '<div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Producto</label>'+
+    '<select id="analSel" style="min-width:300px;background:var(--panel-3);border:1px solid var(--border);color:var(--ink);border-radius:8px;padding:9px 11px;font-size:13px">'+opts+'</select></div>'+
+    '<div style="font-size:12px;color:var(--muted);line-height:1.6">Origen <b style="color:var(--ink)">'+O().label+'</b><br>Vigencia '+v.label+' · Margen '+marg+'%'+(p?(' · '+volOf(p.thick).toFixed(4)+' m³/pza'):'')+'</div></div>'+
+    '<div class="tscroll"><table><thead><tr><th>Destino</th><th class="num">Costo DDP</th><th class="num">Vigencia anterior</th><th class="num">Var.</th><th class="num">P. Venta</th><th class="num">P. Venta $/m³</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="note"><b>China entrega el costo ya puesto (DDP) por destino</b>, así que aquí no hay desglose FOB + flete + arancel: ese detalle lo tiene Gerardo en su Excel. Lo que sí se puede auditar es el costo por destino, su cambio contra la vigencia anterior y el precio de venta resultante (costo ÷ (1−margen)). El margen se toma del control de la pestaña Consultar.</div>';
+  const s=$('analSel');if(s)s.onchange=e=>{analProd=e.target.value;renderAnalisis();};
+}
+
+/* ===== módulo de carga: Excel de Gerardo → preview → RPC pnl_upload_ddp ===== */
+const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function hoyLabel(){const d=new Date();return String(d.getDate()).padStart(2,'0')+'-'+MESES[d.getMonth()]+' '+d.getFullYear();}
+const nrm=s=>String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+let upParsed=null;
+/* Detecta las columnas por ENCABEZADO (robusto a que Gerardo mueva columnas); si no, cae a F..L */
+function detectarMapa(rows){
+  let mejor=null;
+  for(let r=0;r<Math.min(rows.length,15);r++){   /* me quedo con el renglón que reconoce MÁS destinos, no con el primero */
+    const row=rows[r]||[];const cols={};let hits=0;
+    row.forEach((cell,i)=>{const t=nrm(cell);if(!t)return;
+      for(const code of DDP_CODES){if(cols[code]!=null)continue;
+        if(DDP_SYN[code].some(s=>t.includes(s))){cols[code]=i;hits++;break;}}});
+    if(hits>=3&&(!mejor||hits>mejor.hits)){
+      let p25=null,p28=null,viaPcs='posición fija O/R';
+      row.forEach((cell,i)=>{const t=nrm(cell);if(!t)return;   /* todo en una celda: "pcs/cont 25 Ton" */
+        if(/(pza|pz|pieza|pcs|hoja)/.test(t)&&/25/.test(t)&&p25==null){p25=i;viaPcs='encabezado';}
+        if(/(pza|pz|pieza|pcs|hoja)/.test(t)&&/28/.test(t)&&p28==null){p28=i;viaPcs='encabezado';}});
+      if(p25==null||p28==null){
+        /* encabezado en DOS renglones, como lo manda Gerardo: "25 Ton"/"28 Ton" arriba y "pcs/cont" abajo */
+        let g25=null,g28=null;
+        row.forEach((cell,i)=>{const t=nrm(cell);if(!t)return;
+          if(/25/.test(t)&&/ton/.test(t)&&g25==null)g25=i;
+          if(/28/.test(t)&&/ton/.test(t)&&g28==null)g28=i;});
+        const sub=rows[r+1]||[],cont=[];
+        sub.forEach((cell,i)=>{if(/cont/.test(nrm(cell)))cont.push(i);});
+        if(g25!=null&&p25==null){const x=cont.find(i=>i>=g25&&(g28==null||i<g28));if(x!=null){p25=x;viaPcs='encabezado de 2 renglones';}}
+        if(g28!=null&&p28==null){const x=cont.find(i=>i>=g28);if(x!=null){p28=x;viaPcs='encabezado de 2 renglones';}}
+      }
+      mejor={headerRow:r,cols,p25,p28,hits,viaPcs};
+      if(hits===DDP_CODES.length)break;
+    }
+  }
+  if(mejor){
+    const falt=DDP_CODES.filter(c=>mejor.cols[c]==null);
+    falt.forEach(c=>mejor.cols[c]=DDP_FIJO[c]);
+    return {headerRow:mejor.headerRow,cols:mejor.cols,p25:mejor.p25==null?14:mejor.p25,p28:mejor.p28==null?17:mejor.p28,
+      via:'encabezado ('+mejor.hits+'/'+DDP_CODES.length+' destinos'+(falt.length?(', '+falt.join('/')+' por posición fija'):'')+') · piezas por '+mejor.viaPcs,faltantes:falt};
+  }
+  return {headerRow:-1,cols:{...DDP_FIJO},p25:14,p28:17,via:'posición fija F–L (no encontré encabezados)',faltantes:[]};
+}
+function parsearFilas(rows,map){
+  const out=[];const warns=[];let fam=null,ign=0;
+  const start=map.headerRow>=0?map.headerRow+1:0;
+  for(let r=start;r<rows.length;r++){
+    const row=rows[r]||[];
+    const fc=row[1];                                    /* B: familia, se arrastra hacia abajo */
+    if(fc!=null&&String(fc).trim()!=='' && isNaN(Number(fc)))fam=String(fc).trim();
+    const th=Number(row[2]);                            /* C: espesor mm */
+    if(!isFinite(th)||th<=0){ign++;continue;}
+    if(!fam){ign++;warns.push('fila '+(r+1)+': espesor sin familia, ignorada');continue;}
+    const ddp={};let n=0;
+    DDP_CODES.forEach(c=>{const i=map.cols[c];if(i==null)return;const v=Number(row[i]);
+      if(isFinite(v)&&v>0){ddp[c]=Math.round(v*10000)/10000;n++;}});
+    if(!n){ign++;continue;}
+    if(n<DDP_CODES.length)warns.push(fam+' '+th+'mm: solo '+n+' de '+DDP_CODES.length+' destinos con precio');
+    const a=Number(row[map.p25]),b2=Number(row[map.p28]);
+    out.push({fam,thick:th,ddp,pcs25:isFinite(a)&&a>0?Math.round(a):null,pcs28:isFinite(b2)&&b2>0?Math.round(b2):null,sort:out.length});
+  }
+  return {out,ign,warns};
+}
+function compararConActual(nuevos){
+  const v=cur();const act=new Map((v.products||[]).map(p=>[p.fam+'|'+(+p.thick),p]));
+  let iguales=0,cambian=0,nuevas=0;const faltan=[];
+  const vistos=new Set();
+  nuevos.forEach(p=>{const k=p.fam+'|'+(+p.thick);vistos.add(k);const q=act.get(k);
+    if(!q){nuevas++;return;}
+    const dif=DDP_CODES.some(c=>{const a=p.ddp[c],b=q.ddp?q.ddp[c]:null;
+      if(a==null&&b==null)return false;if(a==null||b==null)return true;
+      return Math.abs(+a-+b)>0.005;});
+    dif?cambian++:iguales++;});
+  act.forEach((q,k)=>{if(!vistos.has(k))faltan.push(q.fam+' '+q.thick+'mm');});
+  return {iguales,cambian,nuevas,faltan};
+}
+function pintarPreview(){
+  const el=$('upPrev'),go=$('upGo');
+  if(!upParsed){el.className='note';el.innerHTML='Elige el archivo para ver la vista previa.';go.disabled=true;return;}
+  if(upParsed.error){el.className='note';el.innerHTML='<b style="color:var(--bad,#e06c6c)">No pude leer el archivo:</b> '+upParsed.error;go.disabled=true;return;}
+  const {rows,map,ign,warns,cmp,checksum,fams,hoja}=upParsed;
+  const muestra=rows.slice(0,6).map(p=>'<tr><td>'+p.fam+'</td><td class="num">'+p.thick+'</td>'+
+    DDP_CODES.map(c=>'<td class="num">'+(p.ddp[c]==null?'—':money(p.ddp[c]))+'</td>').join('')+
+    '<td class="num">'+(p.pcs25??'—')+'</td><td class="num">'+(p.pcs28??'—')+'</td></tr>').join('');
+  el.className='';
+  el.innerHTML='<div class="egrid" style="margin-bottom:12px">'+
+      '<div class="ecard"><div class="kk">Productos leídos</div><div class="rov" style="font-size:20px">'+rows.length+'</div></div>'+
+      '<div class="ecard"><div class="kk">Familias</div><div class="rov" style="font-size:20px">'+fams+'</div></div>'+
+      '<div class="ecard"><div class="kk">Valores DDP</div><div class="rov" style="font-size:20px">'+rows.reduce((a,p)=>a+Object.keys(p.ddp).length,0)+'</div></div>'+
+      '<div class="ecard"><div class="kk">Suma de control</div><div class="rov" style="font-size:20px">'+checksum.toFixed(4)+'</div></div></div>'+
+    '<div class="note" style="margin:0 0 10px">Hoja <b>'+hoja+'</b> · columnas por <b>'+map.via+'</b>'+(ign?(' · '+ign+' filas ignoradas (sin espesor o sin precios)'):'')+'<br>'+
+      'Contra la vigencia actual: <b>'+cmp.iguales+'</b> iguales · <b style="color:var(--accent)">'+cmp.cambian+'</b> con cambio de precio · <b>'+cmp.nuevas+'</b> nuevos'+
+      (cmp.faltan.length?(' · <b style="color:var(--bad,#e06c6c)">'+cmp.faltan.length+' desaparecen</b> ('+cmp.faltan.slice(0,4).join(', ')+(cmp.faltan.length>4?'…':'')+')'):'')+'</div>'+
+    (warns.length?('<div class="note" style="margin:0 0 10px">⚠ '+warns.slice(0,5).join(' · ')+(warns.length>5?(' · +'+(warns.length-5)+' más'):'')+'</div>'):'')+
+    '<div class="tscroll"><table><thead><tr><th>Familia</th><th class="num">mm</th>'+DDP_CODES.map(c=>'<th class="num">'+DDP_COL[c].replace('DDP ','')+'</th>').join('')+'<th class="num">pz 25T</th><th class="num">pz 28T</th></tr></thead><tbody>'+muestra+'</tbody></table></div>'+
+    '<div class="note">Muestra de los primeros 6 renglones. Al confirmar se crea la vigencia «'+$('upLabel').value+'» y pasa a ser la vigente; la actual queda en el historial.</div>';
+  go.disabled=rows.length===0;
+}
+async function leerExcel(file){
+  upParsed=null;pintarPreview();
+  $('upPrev').innerHTML='Leyendo el archivo…';
+  try{
+    const XLSX=await import('https://esm.sh/xlsx@0.18.5');
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(new Uint8Array(buf),{type:'array'});
+    const nombre=wb.SheetNames.find(n=>nrm(n).includes('costo'))||wb.SheetNames[0];
+    const ws=wb.Sheets[nombre];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null,blankrows:true});
+    const map=detectarMapa(rows);
+    const {out,ign,warns}=parsearFilas(rows,map);
+    const checksum=out.reduce((a,p)=>a+DDP_CODES.reduce((s,c)=>s+(p.ddp[c]||0),0),0);
+    upParsed={rows:out,map,ign,warns,cmp:compararConActual(out),checksum,fams:new Set(out.map(p=>p.fam)).size,hoja:nombre};
+  }catch(e){upParsed={error:String(e&&e.message||e)};}
+  pintarPreview();
+}
+async function publicarDDP(){
+  if(!upParsed||upParsed.error||!upParsed.rows.length)return;
+  const label=$('upLabel').value.trim()||hoyLabel();
+  const margin=+$('upMarg').value||10;
+  const n=upParsed.rows.length;
+  if(!confirm('Publicar «'+label+'» con '+n+' productos?\n\nLa vigencia actual («'+cur().label+'») pasa al historial.'))return;
+  $('upGo').disabled=true;setSaving('Publicando…');
+  const {data,error}=await sb.rpc('pnl_upload_ddp',{p_list:origin,p_label:label,p_margin:margin,
+    p_products:upParsed.rows.map(p=>({fam:p.fam,thick:p.thick,ddp:p.ddp,pcs25:p.pcs25,pcs28:p.pcs28,sort:p.sort}))});
+  if(error){setSaving('⚠ error');toast('No se pudo publicar: '+error.message);$('upGo').disabled=false;return;}
+  upParsed=null;setSaving('publicado ✓');toast('Vigencia «'+label+'» publicada · '+(data&&data.productos!=null?data.productos:n)+' productos');
+  await loadData();const nv=O().vigs.find(x=>x.is_current);if(nv)curVig[origin]=nv.id;buildAll();renderEditor();
+}
+function wireUploader(){
+  const f=$('upFile');if(!f)return;
+  f.onchange=e=>{const file=e.target.files&&e.target.files[0];if(file)leerExcel(file);};
+  const go=$('upGo');if(go)go.onclick=publicarDDP;
+  const cx=$('upCancel');if(cx)cx.onclick=()=>{upParsed=null;if($('upFile'))$('upFile').value='';pintarPreview();};
+  const lb=$('upLabel');if(lb)lb.oninput=()=>{if(upParsed&&!upParsed.error)pintarPreview();};
+}
+
 /* ===== menús / chrome ===== */
 function grpAsiaCol(c){return c.startsWith('CIF')||c==='FOB'?'Base / CIF':'DDP';}
 function grpBrCol(code){const d=BR_DBYC[code];return d.type==='fob'||d.type==='cif'?'Base / Puerto (FOB · CIF)':d.type==='ddpport'?'DDP en puerto':'DDP en ciudad';}
@@ -540,10 +754,14 @@ function renderDestList(){const codes=destListNow(),grpFn=origin==='asia'?grpAsi
   $('destList').innerHTML=h;$('destN').textContent=destCodesNow().size;}
 function renderMatMenu(){let h='';(O().fams||[]).forEach(f=>{h+='<label class="dopt"><input type="checkbox" data-m="'+encodeURIComponent(f)+'"'+(selMats[origin].has(f)?' checked':'')+'> '+f+'</label>';});$('matList').innerHTML=h;$('matN').textContent=selMats[origin].size;}
 function renderMatChips(){$('matChips').innerHTML=BR_FAMS.map(g=>'<span class="mchip'+(selMats.brasil.has(g)?' on':'')+'" data-m="'+g+'">'+g+'</span>').join('');}
-function syncChips(){const v=cur();if(!v)return;$('tcChip').textContent='$'+v.tc.toFixed(2);$('dutyChip').textContent=dutyStr(v);}
-function syncOriginUI(){const asia=origin==='asia';
-  $('matChipsWrap').classList.toggle('hidden',asia);$('matMenuWrap').classList.toggle('hidden',!asia);$('contWrap').classList.toggle('hidden',!asia);
-  $('originHint').textContent=asia?'Triplay (especies) · MDF · Blockboard — por pieza':'Contrachapado por grado (BC · C+C · CDX · BG) — por hoja';
+function syncChips(){const v=cur();if(!v)return;$('tcChip').textContent=isDDP()?'n/a':('$'+v.tc.toFixed(2));$('dutyChip').textContent=dutyStr(v);}
+function syncOriginUI(){const asia=origin==='asia',ddp=isDDP();
+  $('matChipsWrap').classList.toggle('hidden',asia);$('matMenuWrap').classList.toggle('hidden',!asia);
+  $('contWrap').classList.toggle('hidden',!asia||ddp);
+  $('tcChip').parentElement.classList.toggle('hidden',ddp);
+  $('tabA').textContent=ddp?'🔎 Costos por destino':'🔎 Análisis de costos';
+  $('tabE').textContent=ddp?'⬆ Actualizar desde Excel':'✎ Actualizar insumos';
+  $('originHint').textContent=ddp?'Triplay · MDF · Blockboard — costo DDP directo del Excel de Gerardo (USD/pza)':(asia?'Triplay (especies) · MDF · Blockboard — por pieza':'Contrachapado por grado (BC · C+C · CDX · BG) — por hoja');
   [...$('originSeg').children].forEach(x=>x.classList.toggle('on',x.dataset.o===origin));
   $('vig').innerHTML=O().vigs.map(v=>'<option value="'+v.id+'"'+(v.id===curVig[origin]?' selected':'')+'>'+v.label+'</option>').join('');
   const c=cur();if(c){$('marg').value=c.margin;$('margV').textContent=c.margin+'%';}}
@@ -552,7 +770,7 @@ function buildAll(){syncOriginUI();renderMatChips();renderMatMenu();renderDestLi
 /* ===== eventos ===== */
 $('originSeg').onclick=e=>{const b=e.target.closest('[data-o]');if(!b)return;origin=b.dataset.o;buildAll();};
 $('vig').onchange=e=>{curVig[origin]=e.target.value;buildAll();};
-$('contSeg').onclick=e=>{const b=e.target.closest('[data-c]');if(!b)return;contAS=b.dataset.c;[...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));
+$('contSeg').onclick=e=>{const b=e.target.closest('[data-c]');if(!b||isDDP())return;contAS=b.dataset.c;[...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));
   selDest.asia=new Set(contAS==='25'?['DDP_MANZ25','MONT','GDL']:['DDP_MANZ28','DDP_PROG','DDP_VERA']);renderDestList();renderTable();};
 $('matChips').onclick=e=>{const c=e.target.closest('[data-m]');if(!c)return;const g=c.dataset.m;if(selMats.brasil.has(g)&&selMats.brasil.size>1)selMats.brasil.delete(g);else selMats.brasil.add(g);c.classList.toggle('on',selMats.brasil.has(g));renderTable();};
 $('matBtn').onclick=e=>{e.stopPropagation();$('matPop').classList.toggle('hidden');};
