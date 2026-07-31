@@ -628,6 +628,10 @@ function detectarMapa(rows){
       for(const code of DDP_CODES){if(cols[code]!=null)continue;
         if(DDP_SYN[code].some(s=>t.includes(s))){cols[code]=i;hits++;break;}}});
     if(hits>=3&&(!mejor||hits>mejor.hits)){
+      let famCol=null,thCol=null;                              /* producto y espesor, también por encabezado */
+      row.forEach((cell,i)=>{const t=nrm(cell);if(!t)return;
+        if(famCol==null&&/(producto|familia|descripcion|material)/.test(t))famCol=i;
+        if(thCol==null&&/(espesor|grosor|thickness)/.test(t))thCol=i;});
       let p25=null,p28=null,viaPcs='posición fija O/R';
       row.forEach((cell,i)=>{const t=nrm(cell);if(!t)return;   /* todo en una celda: "pcs/cont 25 Ton" */
         if(/(pza|pz|pieza|pcs|hoja)/.test(t)&&/25/.test(t)&&p25==null){p25=i;viaPcs='encabezado';}
@@ -643,26 +647,33 @@ function detectarMapa(rows){
         if(g25!=null&&p25==null){const x=cont.find(i=>i>=g25&&(g28==null||i<g28));if(x!=null){p25=x;viaPcs='encabezado de 2 renglones';}}
         if(g28!=null&&p28==null){const x=cont.find(i=>i>=g28);if(x!=null){p28=x;viaPcs='encabezado de 2 renglones';}}
       }
-      mejor={headerRow:r,cols,p25,p28,hits,viaPcs};
+      mejor={headerRow:r,cols,p25,p28,hits,viaPcs,famCol,thCol};
       if(hits===DDP_CODES.length)break;
     }
   }
   if(mejor){
     const falt=DDP_CODES.filter(c=>mejor.cols[c]==null);
     falt.forEach(c=>mejor.cols[c]=DDP_FIJO[c]);
-    return {headerRow:mejor.headerRow,cols:mejor.cols,p25:mejor.p25==null?14:mejor.p25,p28:mejor.p28==null?17:mejor.p28,
-      via:'encabezado ('+mejor.hits+'/'+DDP_CODES.length+' destinos'+(falt.length?(', '+falt.join('/')+' por posición fija'):'')+') · piezas por '+mejor.viaPcs,faltantes:falt};
+    /* si no vi los encabezados de producto/espesor, los ubico RELATIVOS al bloque de destinos
+       (en la hoja de Gerardo B y C están 4 y 3 columnas antes de la F) */
+    const d0=Math.min.apply(null,DDP_CODES.map(c=>mejor.cols[c]));
+    const famCol=mejor.famCol!=null?mejor.famCol:(d0>=4?d0-4:1);
+    const thCol=mejor.thCol!=null?mejor.thCol:(d0>=3?d0-3:2);
+    return {headerRow:mejor.headerRow,cols:mejor.cols,p25:mejor.p25==null?14:mejor.p25,p28:mejor.p28==null?17:mejor.p28,famCol,thCol,
+      via:'encabezado ('+mejor.hits+'/'+DDP_CODES.length+' destinos'+(falt.length?(', '+falt.join('/')+' por posición fija'):'')+') · piezas por '+mejor.viaPcs
+        +' · producto/espesor por '+((mejor.famCol!=null&&mejor.thCol!=null)?'encabezado':'posición relativa'),faltantes:falt};
   }
-  return {headerRow:-1,cols:{...DDP_FIJO},p25:14,p28:17,via:'posición fija F–L (no encontré encabezados)',faltantes:[]};
+  return {headerRow:-1,cols:{...DDP_FIJO},p25:14,p28:17,famCol:1,thCol:2,via:'posición fija F–L (no encontré encabezados)',faltantes:[]};
 }
 function parsearFilas(rows,map){
   const out=[];const warns=[];let fam=null,ign=0;
+  const iFam=map.famCol==null?1:map.famCol,iTh=map.thCol==null?2:map.thCol;
   const start=map.headerRow>=0?map.headerRow+1:0;
   for(let r=start;r<rows.length;r++){
     const row=rows[r]||[];
-    const fc=row[1];                                    /* B: familia, se arrastra hacia abajo */
+    const fc=row[iFam];                                 /* familia: se arrastra hacia abajo (celdas combinadas) */
     if(fc!=null&&String(fc).trim()!=='' && isNaN(Number(fc)))fam=String(fc).trim();
-    const th=Number(row[2]);                            /* C: espesor mm */
+    const th=Number(row[iTh]);                          /* espesor mm */
     if(!isFinite(th)||th<=0){ign++;continue;}
     if(!fam){ign++;warns.push('fila '+(r+1)+': espesor sin familia, ignorada');continue;}
     const ddp={};let n=0;
@@ -723,7 +734,13 @@ async function leerExcel(file){
     const wb=XLSX.read(new Uint8Array(buf),{type:'array'});
     const nombre=wb.SheetNames.find(n=>nrm(n).includes('costo'))||wb.SheetNames[0];
     const ws=wb.Sheets[nombre];
-    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null,blankrows:true});
+    let rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null,blankrows:true});
+    /* OJO: SheetJS numera las columnas desde el inicio del RANGO de la hoja, no desde la A.
+       La hoja de Gerardo es B2:R62 (la columna A va vacía), así que sin esto todos los
+       índices se recorren uno y el producto se leería de la columna del espesor. */
+    let desfase=0;
+    try{const ref=ws['!ref'];if(ref)desfase=XLSX.utils.decode_range(ref).s.c;}catch(_){}
+    if(desfase>0)rows=rows.map(r=>new Array(desfase).fill(null).concat(r||[]));
     const map=detectarMapa(rows);
     const {out,ign,warns}=parsearFilas(rows,map);
     const checksum=out.reduce((a,p)=>a+DDP_CODES.reduce((s,c)=>s+(p.ddp[c]||0),0),0);
