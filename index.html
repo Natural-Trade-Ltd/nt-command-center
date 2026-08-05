@@ -642,7 +642,7 @@ async function enterApp(session){
   history.replaceState(null,"",location.pathname); // limpia el hash del magic link
   renderClock(); renderNowSelect(); initLayout();
   await refresh();
-  if(!ticking){ ticking=true; setInterval(tick,1000); setInterval(refresh, 60000); setInterval(checkIdlePause,60000); setInterval(checkMeetings,30000); checkMeetings();
+  if(!ticking){ ticking=true; setInterval(tick,1000); setInterval(refresh, 60000); setInterval(checkMeetings,30000); checkMeetings();
     ['click','keydown','pointerdown'].forEach(ev=>document.addEventListener(ev,()=>{lastInteract=Date.now();},{passive:true})); }
 }
 
